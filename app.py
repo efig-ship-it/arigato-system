@@ -8,17 +8,17 @@ from email.mime.multipart import MIMEMultipart
 # --- הגדרות דף ---
 st.set_page_config(page_title="מערכת גבייה - אריגאטו", layout="centered")
 
-# --- עיצוב CSS פשוט יותר למניעת שגיאות ---
-st.markdown("""
+# --- עיצוב CSS (שימוש ב-Raw String למניעת שגיאות Type) ---
+style_css = r"""
 <style>
     .main { direction: rtl !important; text-align: right !important; }
-    .stButton>button { width: 100%; background-color: #d4af37; color: white; font-weight: bold; height: 3.5em; border-radius: 12px; }
+    div.stButton > button { width: 100%; background-color: #d4af37; color: white; font-weight: bold; height: 3.5em; border-radius: 12px; }
     .header-box { background-color: #003366; color: white; padding: 20px; border-radius: 15px; text-align: center; border-bottom: 5px solid #d4af37; margin-bottom: 25px; }
     label { font-weight: bold !important; color: #003366 !important; }
     input { text-align: right !important; direction: rtl !important; }
 </style>
-""", unsafe_allow_all_with_html=True)
-
+"""
+st.markdown(style_css, unsafe_allow_all_with_html=True)
 st.markdown('<div class="header-box"><h1>מערכת גבייה - אריגאטו</h1></div>', unsafe_allow_all_with_html=True)
 
 # --- שלב 1: העלאת קבצים ---
@@ -41,19 +41,19 @@ if up_ex:
         c_col = next((c for c in df.columns if c in ['COMPANY', 'חברה', 'שם חברה', 'NAME']), None)
         e_col = next((c for c in df.columns if c in ['EMAIL', 'מייל', 'אימייל', 'MAIL']), None)
         if c_col and e_col:
-            st.success(f"✅ אקסל נטען: {len(df)} שורות")
+            st.success("✅ האקסל נטען בהצלחה")
             st.session_state['cols'] = (c_col, e_col)
     except Exception as e:
-        st.error(f"שגיאה באקסל: {e}")
+        st.error(f"Error: {e}")
 
 if up_wd:
     try:
         word_data = up_wd.read()
         doc = Document(io.BytesIO(word_data))
         template_text = "\n".join([p.text for p in doc.paragraphs])
-        if template_text: st.success("✅ טמפלט וורד נטען")
+        if template_text: st.success("✅ טמפלט הוורד נטען")
     except Exception as e:
-        st.error(f"שגיאה בוורד: {e}")
+        st.error(f"Error: {e}")
 
 # --- שלב 2: פרטי אימות ושליחה ---
 st.markdown("---")
@@ -71,8 +71,6 @@ user_subj = st.text_input("נושא המייל ללקוח:")
 if st.button("🚀 התחל שליחת מיילים"):
     if df is not None and template_text and user_mail and user_pass and user_subj:
         prog = st.progress(0)
-        status = st.empty()
-        
         try:
             server = smtplib.SMTP('smtp.gmail.com', 587)
             server.starttls()
@@ -95,7 +93,6 @@ if st.button("🚀 התחל שליחת מיילים"):
                 server.send_message(msg)
                 sent_count += 1
                 prog.progress((i + 1) / len(df))
-                status.text(f"שולח אל: {row[c_col]}")
                 time.sleep(0.4)
                 
             server.quit()
@@ -104,4 +101,4 @@ if st.button("🚀 התחל שליחת מיילים"):
         except Exception as e:
             st.error(f"❌ שגיאה: {e}")
     else:
-        st.warning("⚠️ נא למלא את כל השדות ולהעלות קבצים.")
+        st.warning("⚠️ נא למלא את כל השדות.")
