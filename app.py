@@ -5,108 +5,118 @@ import io, smtplib, time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Basic Page Config
-st.set_page_config(page_title="Arigato Billing System", layout="centered")
+# --- הגדרות דף ---
+st.set_page_config(page_title="מערכת גבייה - אריגאטו", layout="centered")
 
-# App Header
-st.title("Arigato Billing System")
-st.markdown("---")
+# --- עיצוב CSS (RTL) ---
+st.markdown("""
+    <style>
+    .main { direction: rtl; text-align: right; }
+    div.stButton > button {
+        width: 100%;
+        background-color: #d4af37;
+        color: white;
+        font-weight: bold;
+        height: 3.5em;
+        border-radius: 12px;
+        border: none;
+    }
+    .app-header {
+        background-color: #003366;
+        color: #ffffff;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        border-bottom: 5px solid #d4af37;
+        margin-bottom: 25px;
+    }
+    label { font-weight: bold !important; color: #003366 !important; }
+    input { text-align: right; direction: rtl; }
+    </style>
+    <div class="app-header"><h1>מערכת גבייה - אריגאטו</h1></div>
+""", unsafe_allow_all_with_html=True)
 
-# Constant Settings
-MY_APP_PASSWORD = "nwfk odkt qzzc whhv"
-
-# Step 1: File Upload
-st.subheader("Step 1: Upload Files")
+# --- שלב 1: העלאת קבצים ---
+st.subheader("📁 שלב 1: העלאת קבצים")
 col1, col2 = st.columns(2)
 
-with col1:
-    up_ex = st.file_uploader("Upload Excel (.xlsx)", type=['xlsx'])
-with col2:
-    up_wd = st.file_uploader("Upload Template (.docx)", type=['docx'])
-
-# Data placeholders
 df = None
 template_text = ""
 
-# Process Excel
+with col1:
+    up_ex = st.file_uploader("טען אקסל גבייה", type=['xlsx'])
+with col2:
+    up_wd = st.file_uploader("טען טמפלט וורד", type=['docx'])
+
 if up_ex:
     try:
-        excel_bytes = up_ex.read()
-        df = pd.read_excel(io.BytesIO(excel_bytes), engine='openpyxl')
+        df = pd.read_excel(io.BytesIO(up_ex.read()), engine='openpyxl')
         df.columns = [str(col).strip().upper() for col in df.columns]
-        
-        # Look for Company and Email columns
-        c_col = next((c for c in df.columns if c in ['COMPANY', 'NAME', 'חברה', 'שם חברה']), None)
-        e_col = next((c for c in df.columns if c in ['EMAIL', 'MAIL', 'מייל', 'אימייל']), None)
-        
+        c_col = next((c for c in df.columns if c in ['COMPANY', 'חברה', 'שם חברה', 'NAME']), None)
+        e_col = next((c for c in df.columns if c in ['EMAIL', 'מייל', 'אימייל', 'MAIL']), None)
         if c_col and e_col:
-            st.success(f"Excel loaded! Found {len(df)} rows.")
-            st.session_state['c_col'] = c_col
-            st.session_state['e_col'] = e_col
-        else:
-            st.error("Could not find Company or Email columns in Excel.")
+            st.success(f"✅ אקסל נטען: {len(df)} שורות")
+            st.session_state['cols'] = (c_col, e_col)
     except Exception as e:
-        st.error(f"Error reading Excel: {str(e)}")
+        st.error(f"שגיאה באקסל: {e}")
 
-# Process Word
 if up_wd:
     try:
-        word_bytes = up_wd.read()
-        doc = Document(io.BytesIO(word_bytes))
+        doc = Document(io.BytesIO(up_wd.read()))
         template_text = "\n".join([p.text for p in doc.paragraphs])
-        if template_text.strip():
-            st.success("Word template loaded!")
+        if template_text: st.success("✅ טמפלט וורד נטען")
     except Exception as e:
-        st.error(f"Error reading Word: {str(e)}")
+        st.error(f"שגיאה בוורד: {e}")
 
-# Step 2: Email Details
+# --- שלב 2: פרטי אימות ושליחה ---
 st.markdown("---")
-st.subheader("Step 2: Sending Details")
-mail_in = st.text_input("Your Gmail Address:")
-subj_in = st.text_input("Email Subject:")
+st.subheader("🔐 שלב 2: פרטי חשבון ושליחה")
+col_m, col_p = st.columns(2)
 
-# Step 3: Execution
-if st.button("Start Sending Emails"):
-    if df is not None and template_text and mail_in and subj_in:
+with col_m:
+    user_mail = st.text_input("כתובת ה-Gmail שלך:", placeholder="example@gmail.com")
+with col_p:
+    # שדה סיסמה שמוצג כנקודות (type="password")
+    user_pass = st.text_input("סיסמת אפליקציה (App Password):", type="password", help="ניתן להנפיק סיסמה זו בהגדרות חשבון גוגל תחת 'אבטחה'")
+
+user_subj = st.text_input("נושא המייל ללקוח:")
+
+# --- שלב 3: ביצוע ---
+if st.button("🚀 התחל שליחת מיילים"):
+    if df is not None and template_text and user_mail and user_pass and user_subj:
         prog = st.progress(0)
         status = st.empty()
         
-        c_col = st.session_state.get('c_col')
-        e_col = st.session_state.get('e_col')
-
         try:
-            # Login to SMTP
             server = smtplib.SMTP('smtp.gmail.com', 587)
             server.starttls()
-            server.login(mail_in.strip(), MY_APP_PASSWORD.replace(" ", ""))
-
-            count = 0
+            # משתמש בסיסמה שהמשתמש הזין בשדה
+            server.login(user_mail.strip(), user_pass.replace(" ", ""))
+            
+            c_col, e_col = st.session_state['cols']
+            sent_count = 0
+            
             for i, row in df.iterrows():
-                if pd.isna(row[c_col]) or pd.isna(row[e_col]):
-                    continue
+                if pd.isna(row[c_col]) or pd.isna(row[e_col]): continue
                 
-                # Build Message
                 msg = MIMEMultipart()
-                msg['From'] = mail_in.strip()
+                msg['From'] = user_mail.strip()
                 msg['To'] = str(row[e_col]).strip()
-                msg['Subject'] = subj_in.strip()
+                msg['Subject'] = user_subj.strip()
                 
-                # Replace tag
                 body = template_text.replace("{COMPANY}", str(row[c_col]))
                 msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-                server.send_message(msg)
-                count += 1
                 
-                # Update Progress
+                server.send_message(msg)
+                sent_count += 1
                 prog.progress((i + 1) / len(df))
-                status.text(f"Sent to: {row[c_col]}")
-                time.sleep(0.3)
-
+                status.text(f"שולח אל: {row[c_col]}")
+                time.sleep(0.4)
+                
             server.quit()
-            st.success(f"Done! {count} emails sent successfully.")
+            st.success(f"✨ הסתיים! נשלחו {sent_count} מיילים.")
             st.balloons()
         except Exception as e:
-            st.error(f"Error during sending: {str(e)}")
+            st.error(f"❌ שגיאת התחברות או שליחה: {e}")
     else:
-        st.warning("Please upload files and fill all fields.")
+        st.warning("⚠️ נא למלא את כל השדות ולהעלות את הקבצים.")
