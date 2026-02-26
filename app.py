@@ -8,33 +8,18 @@ from email.mime.multipart import MIMEMultipart
 # --- הגדרות דף ---
 st.set_page_config(page_title="מערכת גבייה - אריגאטו", layout="centered")
 
-# --- עיצוב CSS (RTL) ---
+# --- עיצוב CSS פשוט יותר למניעת שגיאות ---
 st.markdown("""
-    <style>
-    .main { direction: rtl; text-align: right; }
-    div.stButton > button {
-        width: 100%;
-        background-color: #d4af37;
-        color: white;
-        font-weight: bold;
-        height: 3.5em;
-        border-radius: 12px;
-        border: none;
-    }
-    .app-header {
-        background-color: #003366;
-        color: #ffffff;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        border-bottom: 5px solid #d4af37;
-        margin-bottom: 25px;
-    }
+<style>
+    .main { direction: rtl !important; text-align: right !important; }
+    .stButton>button { width: 100%; background-color: #d4af37; color: white; font-weight: bold; height: 3.5em; border-radius: 12px; }
+    .header-box { background-color: #003366; color: white; padding: 20px; border-radius: 15px; text-align: center; border-bottom: 5px solid #d4af37; margin-bottom: 25px; }
     label { font-weight: bold !important; color: #003366 !important; }
-    input { text-align: right; direction: rtl; }
-    </style>
-    <div class="app-header"><h1>מערכת גבייה - אריגאטו</h1></div>
+    input { text-align: right !important; direction: rtl !important; }
+</style>
 """, unsafe_allow_all_with_html=True)
+
+st.markdown('<div class="header-box"><h1>מערכת גבייה - אריגאטו</h1></div>', unsafe_allow_all_with_html=True)
 
 # --- שלב 1: העלאת קבצים ---
 st.subheader("📁 שלב 1: העלאת קבצים")
@@ -50,7 +35,8 @@ with col2:
 
 if up_ex:
     try:
-        df = pd.read_excel(io.BytesIO(up_ex.read()), engine='openpyxl')
+        excel_data = up_ex.read()
+        df = pd.read_excel(io.BytesIO(excel_data), engine='openpyxl')
         df.columns = [str(col).strip().upper() for col in df.columns]
         c_col = next((c for c in df.columns if c in ['COMPANY', 'חברה', 'שם חברה', 'NAME']), None)
         e_col = next((c for c in df.columns if c in ['EMAIL', 'מייל', 'אימייל', 'MAIL']), None)
@@ -62,7 +48,8 @@ if up_ex:
 
 if up_wd:
     try:
-        doc = Document(io.BytesIO(up_wd.read()))
+        word_data = up_wd.read()
+        doc = Document(io.BytesIO(word_data))
         template_text = "\n".join([p.text for p in doc.paragraphs])
         if template_text: st.success("✅ טמפלט וורד נטען")
     except Exception as e:
@@ -74,10 +61,9 @@ st.subheader("🔐 שלב 2: פרטי חשבון ושליחה")
 col_m, col_p = st.columns(2)
 
 with col_m:
-    user_mail = st.text_input("כתובת ה-Gmail שלך:", placeholder="example@gmail.com")
+    user_mail = st.text_input("כתובת ה-Gmail שלך:")
 with col_p:
-    # שדה סיסמה שמוצג כנקודות (type="password")
-    user_pass = st.text_input("סיסמת אפליקציה (App Password):", type="password", help="ניתן להנפיק סיסמה זו בהגדרות חשבון גוגל תחת 'אבטחה'")
+    user_pass = st.text_input("סיסמת אפליקציה (App Password):", type="password")
 
 user_subj = st.text_input("נושא המייל ללקוח:")
 
@@ -90,7 +76,6 @@ if st.button("🚀 התחל שליחת מיילים"):
         try:
             server = smtplib.SMTP('smtp.gmail.com', 587)
             server.starttls()
-            # משתמש בסיסמה שהמשתמש הזין בשדה
             server.login(user_mail.strip(), user_pass.replace(" ", ""))
             
             c_col, e_col = st.session_state['cols']
@@ -117,6 +102,6 @@ if st.button("🚀 התחל שליחת מיילים"):
             st.success(f"✨ הסתיים! נשלחו {sent_count} מיילים.")
             st.balloons()
         except Exception as e:
-            st.error(f"❌ שגיאת התחברות או שליחה: {e}")
+            st.error(f"❌ שגיאה: {e}")
     else:
-        st.warning("⚠️ נא למלא את כל השדות ולהעלות את הקבצים.")
+        st.warning("⚠️ נא למלא את כל השדות ולהעלות קבצים.")
