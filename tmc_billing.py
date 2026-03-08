@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import smtplib, time, io
+import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -10,6 +11,17 @@ st.set_page_config(page_title="TMC Billing System", layout="centered")
 
 st.title("TMC Billing System")
 st.write("---")
+
+# פונקציה להשמעת צליל עצוב (Sad Trombone)
+def play_sad_sound():
+    # קישור לצליל עצוב ציבורי
+    sound_url = "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
+    audio_html = f"""
+        <audio autoplay>
+            <source src="{sound_url}" type="audio/mp3">
+        </audio>
+    """
+    st.components.v1.html(audio_html, height=0)
 
 # חלק 1: העלאת קבצים
 st.header("1. Upload Files")
@@ -36,9 +48,6 @@ st.header("2. Sender Details")
 user_mail = st.text_input("Your Gmail Address:", placeholder="example@gmail.com")
 user_pass = st.text_input("App Password:", type="password")
 
-with st.expander("🔑 How to create an App Password for TMC?"):
-    st.markdown("Go to Google Account Security -> 2-Step Verification -> App passwords.")
-
 user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
 
 st.write("---")
@@ -51,18 +60,13 @@ def get_files_for_company(company_name, files_list):
             matched_files.append(uploaded_file)
     return matched_files
 
-# פונקציית עזר ל"מבול" של פרצופים עצובים
-def show_sad_face_flood():
-    sad_faces = "😭 😥 😟 💔 😿 📉 ❌ " * 15
-    st.write(sad_faces)
-    st.toast("Something went wrong...", icon="😭")
-
 # כפתור הפעלה
 if st.button("Start Bulk Sending", use_container_width=True):
+    # בדיקה אם הועלו קבצים
     if not uploaded_files:
-        show_sad_face_flood()
         st.error("😭 NO FILES UPLOADED! 😭")
-        st.write("💔 Please drag and drop your invoice files first. 💔")
+        play_sad_sound() # השמעת צליל עצוב
+        st.write("💔 Please drag and drop your invoice files first.")
     
     elif up_ex and user_mail and user_pass:
         try:
@@ -112,14 +116,13 @@ if st.button("Start Bulk Sending", use_container_width=True):
                 st.success(f"Successfully sent {sent_count} emails!")
                 st.balloons()
             else:
-                show_sad_face_flood()
                 st.error("😭 0 EMAILS SENT! 😭")
-                st.write("💔 I couldn't find any file names that match the company names in your Excel. 💔")
-                st.write("😭 😭 😭 😭 😭 😭 😭 😭 😭 😭")
+                play_sad_sound() # השמעת צליל עצוב
+                st.write("💔 No matching files found... check your file names.")
 
         except Exception as e:
-            show_sad_face_flood()
-            st.error(f"😭 TECHNICAL ERROR: {e} 😭")
-            st.write("💔 :( :( :( :( :( 💔")
+            st.error(f"😭 TECHNICAL ERROR: {e}")
+            play_sad_sound() # השמעת צליל עצוב
+            st.write("💔 Check your App Password or connection.")
     else:
         st.warning("Please fill in all details.")
