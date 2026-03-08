@@ -4,7 +4,7 @@ import smtplib, time, sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing System", layout="centered")
@@ -21,8 +21,9 @@ def init_db():
 def add_to_history(company, recipients, files):
     conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
+    # שמירה בפורמט ISO (YYYY-MM-DD) כדי שהפילטור יהיה קל יותר
     c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
-              (datetime.now().strftime("%d/%m/%Y"), company, recipients, files))
+              (datetime.now().strftime("%Y-%m-%d"), company, recipients, files))
     conn.commit()
     conn.close()
 
@@ -30,20 +31,20 @@ def get_history():
     conn = sqlite3.connect('billing_history.db')
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
+    if not df.empty:
+        df['Date'] = pd.to_datetime(df['Date']).dt.date
     return df
 
 init_db()
 
-# עיצוב CSS לצמצום רווחים מקסימלי
+# עיצוב CSS
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; padding-bottom: 0rem; }
     h1 { margin-top: 0rem !important; margin-bottom: 1rem !important; font-size: 2rem; }
-    h3 { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; }
     .stVerticalBlock { gap: 0.4rem; }
     hr { margin: 0.5em 0px; }
     .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
-    [data-testid="stMetricValue"] { font-size: 1.5rem; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -102,7 +103,8 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    msg.attach(MIMEText(f"Attached are the invoice and report for {company}.\nDue: {current_month_year}", 'plain'))
+                    body = f"Attached are files for {company}.\nDue: {current_month_year}"
+                    msg.attach(MIMEText(body, 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -118,29 +120,39 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: דשבורד והיסטוריה ---
+# --- חלק 3: דשבורד והיסטוריה עם לוח שנה ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    # סיכום נתונים קומפקטי (Metrics)
     m1, m2, m3 = st.columns(3)
     m1.metric("Companies", len(history_df['Company'].unique()))
     m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-    m3.metric("Last Sent", history_df['Date'].iloc[0])
+    m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d/%m/%Y"))
 
     with st.expander("📊 View History & Filters", expanded=True):
-        # מסננים בשורה אחת קומפקטית
-        f1, f2 = st.columns(2)
+        f1, f2 = st.columns([1, 1.2])
+        
+        # סנן חברה (Multiselect)
         sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()))
-        sel_date = f2.multiselect("Filter Date", options=sorted(history_df['Date'].unique(), reverse=True))
+        
+        # סנן תאריך (Calendar - Date Input)
+        sel_date_range = f2.date_input("Filter by Date Range", value=[], help="Select start and end date")
 
         filtered_df = history_df.copy()
-        if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-        if sel_date: filtered_df = filtered_df[filtered_df['Date'].isin(sel_date)]
+        
+        # החלת פילטר חברה
+        if sel_comp:
+            filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            
+        # החלת פילטר תאריך (Calendar)
+        if len(sel_date_range) == 2:
+            start_date, end_date = sel_date_range
+            filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
+        elif len(sel_date_range) == 1:
+            filtered_df = filtered_df[filtered_df['Date'] == sel_date_range[0]]
 
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True,
-                    column_config={"Recipients": "Emails", "Files": "Files Attached"})
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
         
         if st.button("🗑️ Reset History"):
             conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
