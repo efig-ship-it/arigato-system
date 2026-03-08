@@ -6,7 +6,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף - עיצוב מהודק
+# הגדרות דף - נקי ומהודק
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
 st.markdown("""
@@ -15,8 +15,8 @@ st.markdown("""
     h1 { margin-top: 1rem !important; margin-bottom: 1rem !important; }
     .stVerticalBlock { gap: 0.6rem; }
     hr { margin: 0.6em 0px; }
-    /* עיצוב מיוחד כדי שה-Expander יתיישר יפה ליד השדה */
-    .stExpander { border: none !important; margin-top: 28px !important; }
+    /* יישור תיבת העזרה לגובה השדות */
+    .stExpander { margin-top: 28px !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -45,25 +45,27 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח (הסבר ליד הסיסמה) ---
+# --- חלק 2: פרטי שולח (הסבר מפורט עם קישור ליד הסיסמה) ---
 st.write("---")
 st.subheader("2. Sender Details")
 
-# חלוקה ל-3 עמודות: מייל, סיסמה, והסבר
-sc1, sc2, sc3 = st.columns([1.5, 1.5, 1.2])
+# חלוקה ל-3 עמודות: מייל, סיסמה, והסבר מפורט
+sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
 
 user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
 
 with sc3:
-    # ה-Expander מופיע עכשיו לצד השדה
-    with st.expander("🔑 Help"):
+    with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
-        **How to create?**
-        1. Google Security
-        2. 2-Step Auth: **ON**
-        3. App Passwords
-        4. Copy 16-char code
+        To send emails via Gmail, you need a unique **App Password**.
+        *Standard login passwords will not work.*
+
+        1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+        2. Make sure **2-Step Verification** is turned **ON**.
+        3. Search for **'App passwords'** in the top search bar.
+        4. Select a name (e.g., "TMC Billing") and click **Create**.
+        5. Copy the **16-character code** and paste it here.
         """)
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -114,7 +116,6 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 play_sound("success")
                 st.balloons()
             else:
-                # התיקון שביקשת קודם: אם נשלחו 0, זה לא הצלחה
                 st.error("0 emails were sent. No matches found.")
                 play_sound("error")
         except Exception as e:
