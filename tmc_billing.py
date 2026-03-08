@@ -11,13 +11,13 @@ st.set_page_config(page_title="TMC Billing System", layout="centered")
 st.title("TMC Billing System")
 st.write("---")
 
-# פונקציה להשמעת צלילים
+# פונקציה להשמעת צלילים (הצלחה/כישלון)
 def play_sound(sound_type):
     if sound_type == "success":
-        # צליל Ta-Da משמח
-        sound_url = "https://www.myinstants.com/media/sounds/ta-da.mp3"
+        # הצליל שבחרת: מחיאות כפיים
+        sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3"
     else:
-        # צליל טרומבון עצוב
+        # צליל טרומבון עצוב (קצר)
         sound_url = "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
         
     audio_html = f"""
@@ -52,13 +52,11 @@ st.header("2. Sender Details")
 user_mail = st.text_input("Your Gmail Address:", placeholder="example@gmail.com")
 user_pass = st.text_input("App Password:", type="password")
 
-with st.expander("🔑 How to create an App Password for TMC?"):
-    st.markdown("Go to Google Account Security -> 2-Step Verification -> App passwords.")
-
 user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
 
 st.write("---")
 
+# פונקציה לחיפוש קבצים לפי שם חברה
 def get_files_for_company(company_name, files_list):
     matched_files = []
     search_name = str(company_name).strip().lower()
@@ -69,6 +67,7 @@ def get_files_for_company(company_name, files_list):
 
 # כפתור הפעלה
 if st.button("Start Bulk Sending", use_container_width=True):
+    # בדיקה אם הועלו קבצים נספחים
     if not uploaded_files:
         st.error("😭 NO FILES UPLOADED! 😭")
         play_sound("error")
@@ -90,6 +89,8 @@ if st.button("Start Bulk Sending", use_container_width=True):
             for i, row in df.iterrows():
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
+                
+                # שימוש ב-df.columns למניעת שגיאת ה-Series הקודמת
                 day_val = str(row.iloc[2]).strip() if len(df.columns) > 2 else "10"
                 due_date = f"{day_val} {current_month_year}"
                 
@@ -120,16 +121,15 @@ if st.button("Start Bulk Sending", use_container_width=True):
 
             if sent_count > 0:
                 st.success(f"Successfully sent {sent_count} emails!")
-                play_sound("success") # השמעת Ta-Da!
+                play_sound("success") # השמעת מחיאות כפיים! 👏
                 st.balloons()
             else:
                 st.error("😭 0 EMAILS SENT! 😭")
-                play_sound("error") # השמעת טרומבון עצוב
-                st.write("💔 No matching files found... check your file names.")
+                play_sound("error")
+                st.write("💔 No matching files found. Check your file names.")
 
         except Exception as e:
             st.error(f"😭 TECHNICAL ERROR: {e}")
             play_sound("error")
-            st.write("💔 Check your App Password or connection.")
     else:
-        st.warning("Please fill in all details.")
+        st.warning("Please fill in all details and upload the mailing list.")
