@@ -44,8 +44,8 @@ st.markdown("""
     .stVerticalBlock { gap: 0.4rem; }
     hr { margin: 0.5em 0px; }
     .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
-    /* צמצום גובה שדות התאריך */
-    div[data-testid="stDateInput"] { margin-bottom: -10px; }
+    /* עיצוב ייעודי לכותרת ה-Due Date */
+    .due-date-label { font-size: 14px; margin-bottom: 5px; font-weight: 500; color: #31333F; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,6 +57,8 @@ c1, c2 = st.columns([2, 1])
 with c1:
     up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
 with c2:
+    # הוספת כותרת Due Date מעל הבחירה
+    st.markdown('<p class="due-date-label">Due Date</p>', unsafe_allow_html=True)
     mc, yc = st.columns(2)
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1, label_visibility="collapsed")
@@ -64,9 +66,9 @@ with c2:
     sel_y = yc.selectbox("Yr", years, index=1, label_visibility="collapsed")
     current_month_year = f"{sel_m} {sel_y}"
 
-uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח (פירוט מלא נשמר) ---
+# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -89,7 +91,7 @@ user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {curren
 
 # --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
-    if not up_ex or not uploaded_files or not user_mail:
+    if not up_ex or not uploaded_files or not user_mail or not user_pass:
         st.error("Please fill all fields and upload files.")
     else:
         try:
@@ -125,7 +127,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: דשבורד והיסטוריה עם לוח שנה קומפקטי ---
+# --- חלק 3: דשבורד והיסטוריה ---
 st.write("---")
 history_df = get_history()
 
@@ -136,7 +138,6 @@ if not history_df.empty:
     m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d/%m/%Y"))
 
     with st.expander("📊 View History & Filters", expanded=True):
-        # סידור הסננים בשורה אחת צפופה
         f1, f2 = st.columns([1.5, 1])
         sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()), placeholder="Choose...")
         sel_date_range = f2.date_input("Date Range", value=[], help="Start & End dates")
