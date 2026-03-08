@@ -4,6 +4,7 @@ import smtplib, time, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+from datetime import datetime
 
 # הגדרות דף - TMC Billing System
 st.set_page_config(page_title="TMC Billing System", layout="centered")
@@ -14,10 +15,8 @@ st.write("---")
 # פונקציה להשמעת צלילים (הצלחה/כישלון)
 def play_sound(sound_type):
     if sound_type == "success":
-        # מחיאות כפיים
         sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3"
     else:
-        # טרומבון עצוב
         sound_url = "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
         
     audio_html = f"""
@@ -27,7 +26,7 @@ def play_sound(sound_type):
     """
     st.components.v1.html(audio_html, height=0)
 
-# חלק 1: העלאת קבצים
+# חלק 1: העלאת קבצים ובחירת תאריך
 st.header("1. Upload Files")
 col1, col2 = st.columns(2)
 
@@ -36,8 +35,22 @@ with col1:
     up_ex = st.file_uploader("Upload Excel List", type=['xlsx'], label_visibility="collapsed")
     
 with col2:
-    st.markdown("**2. Current Month & Year**")
-    current_month_year = st.text_input("Month/Year", value="March 2026", label_visibility="collapsed")
+    st.markdown("**2. Select Billing Period**")
+    # יצירת רשימת חודשים ושנים לבחירה
+    months = ["January", "February", "March", "April", "May", "June", 
+              "July", "August", "September", "October", "November", "December"]
+    
+    current_year = datetime.now().year
+    years = [str(y) for y in range(current_year - 1, current_year + 5)]
+    
+    # הצבת שתי תיבות בחירה קטנות אחת ליד השנייה
+    m_col, y_col = st.columns(2)
+    with m_col:
+        selected_month = st.selectbox("Month", options=months, index=datetime.now().month - 1, label_visibility="collapsed")
+    with y_col:
+        selected_year = st.selectbox("Year", options=years, index=1, label_visibility="collapsed")
+    
+    current_month_year = f"{selected_month} {selected_year}"
 
 st.markdown("**3. Upload all Invoices & Reports (PDF/Excel)**")
 uploaded_files = st.file_uploader("Drag and drop all files here", 
@@ -70,7 +83,6 @@ user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {curre
 st.write("---")
 
 def get_files_for_company(company_name, files_list):
-    """פונקציה לחיפוש קבצים לפי שם חברה"""
     matched_files = []
     search_name = str(company_name).strip().lower()
     for uploaded_file in files_list:
@@ -90,7 +102,6 @@ if st.button("Start Bulk Sending", use_container_width=True):
             prog = st.progress(0)
             status = st.empty()
             
-            # התחברות לשרת Gmail
             server = smtplib.SMTP("smtp.gmail.com", 587)
             server.starttls()
             server.login(user_mail.strip(), user_pass.replace(" ", ""))
@@ -102,7 +113,6 @@ if st.button("Start Bulk Sending", use_container_width=True):
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                 
-                # בדיקה מול df.columns למניעת שגיאה
                 day_val = str(row.iloc[2]).strip() if len(df.columns) > 2 else "10"
                 due_date = f"{day_val} {current_month_year}"
                 
@@ -132,7 +142,7 @@ if st.button("Start Bulk Sending", use_container_width=True):
             server.quit()
 
             if sent_count > 0:
-                st.success(f"Successfully sent {sent_count} emails!")
+                st.success(f"Successfully sent {sent_count} emails for {current_month_year}!")
                 play_sound("success")
                 st.balloons()
             else:
