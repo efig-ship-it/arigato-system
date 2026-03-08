@@ -8,7 +8,7 @@ from email.mime.application import MIMEApplication
 # הגדרות דף - TMC Billing System
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-# עיצוב CSS נקי עם נגיעות צבע (כחול וזהב)
+# עיצוב CSS נקי ויוקרתי
 st.markdown("""
     <style>
     .stApp {
@@ -28,6 +28,7 @@ st.markdown("""
         width: 100%;
         font-size: 20px;
         border: 2px solid #B8860B;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
     }
     .stButton>button:hover {
         background-color: #1A365D;
@@ -37,7 +38,8 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏨 TMC Billing System")
+st.title("🏨 TMC Hotel Billing System")
+st.write("Welcome to the TMC Concierge Terminal. Please manage your departures below.")
 st.write("---")
 
 # פונקציה להשמעת צלילים
@@ -50,18 +52,18 @@ def play_sound(sound_type):
     st.components.v1.html(audio_html, height=0)
 
 # חלק 1: העלאת קבצים
-st.header("1. Upload Files")
+st.header("🔑 1. Upload Files")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("**1. Upload Mailing List (Excel)**")
+    st.markdown("**📁 1. Upload Mailing List (Excel)**")
     up_ex = st.file_uploader("Upload Excel List", type=['xlsx'], label_visibility="collapsed")
     
 with col2:
-    st.markdown("**2. Current Month & Year**")
+    st.markdown("**📅 2. Current Month & Year**")
     current_month_year = st.text_input("Month/Year", value="March 2026", label_visibility="collapsed")
 
-st.markdown("**3. Upload all Invoices & Reports (PDF/Excel)**")
+st.markdown("**💼 3. Upload all Invoices & Reports (PDF/Excel)**")
 uploaded_files = st.file_uploader("Drag and drop all files here", 
                                  type=['pdf', 'xlsx', 'xls'], 
                                  accept_multiple_files=True,
@@ -70,9 +72,23 @@ uploaded_files = st.file_uploader("Drag and drop all files here",
 st.write("---")
 
 # חלק 2: פרטי שולח
-st.header("2. Sender Details")
+st.header("🛎️ 2. Sender Details")
 user_mail = st.text_input("Your Gmail Address:", placeholder="example@gmail.com")
 user_pass = st.text_input("App Password:", type="password")
+
+# החזרת ההסבר החשוב על ה-App Password
+with st.expander("🔑 How to create an App Password for TMC?"):
+    st.markdown("""
+    To send emails via Gmail, you need a unique **App Password**. 
+    *Standard login passwords will not work.*
+    
+    1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+    2. Make sure **2-Step Verification** is turned **ON**.
+    3. Search for **'App passwords'** in the top search bar.
+    4. Select a name (e.g., "TMC Billing") and click **Create**.
+    5. Copy the **16-character code** and paste it above.
+    """)
+
 user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
 
 st.write("---")
@@ -85,7 +101,7 @@ def get_files_for_company(company_name, files_list):
             matched_files.append(uploaded_file)
     return matched_files
 
-# כפתור הפעלה - עם המילים המקוריות ואימוג'י דלת
+# כפתור הפעלה
 if st.button("🚪 Start Bulk Sending", use_container_width=True):
     if not uploaded_files:
         st.error("😭 NO FILES UPLOADED! 😭")
