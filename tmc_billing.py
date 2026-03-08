@@ -21,7 +21,7 @@ def init_db():
 def add_to_history(company, recipients, files):
     conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
-    # שמירה בפורמט ISO (YYYY-MM-DD) לצרכי חישוב, התצוגה תשתנה בהמשך
+    # שמירה בפורמט ISO לצרכי מערכת (YYYY-MM-DD)
     c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
               (datetime.now().strftime("%Y-%m-%d"), company, recipients, files))
     conn.commit()
@@ -32,13 +32,13 @@ def get_history():
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
     if not df.empty:
-        # המרה לאובייקט תאריך
+        # המרה לאובייקט תאריך של פייתון
         df['Date'] = pd.to_datetime(df['Date']).dt.date
     return df
 
 init_db()
 
-# עיצוב CSS לצמצום רווחים ומרכוז
+# עיצוב CSS
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; padding-bottom: 0rem; }
@@ -79,7 +79,7 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח ---
+# --- חלק 2: פרטי שולח (פירוט APP PASSWORD נשמר מילה במילה) ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -147,9 +147,9 @@ if not history_df.empty:
     m1.metric("Companies", len(history_df['Company'].unique()))
     m2.metric("Total Emails", int(history_df['Recipients'].sum()))
     
-    # שינוי תצוגת התאריך האחרון לפורמט DD-MM-YYYY
-    last_sent_formatted = history_df['Date'].iloc[0].strftime("%d-%m-%Y")
-    m3.metric("Last Sent", last_sent_formatted)
+    # תיקון: הצגת תאריך בפורמט DD-MM-YYYY (קודם היום)
+    last_sent_dt = history_df['Date'].iloc[0]
+    m3.metric("Last Sent", last_sent_dt.strftime("%d-%m-%Y"))
 
     with st.expander("📊 View History & Filters", expanded=True):
         f1, f2 = st.columns([1.5, 1])
@@ -165,7 +165,7 @@ if not history_df.empty:
         elif len(sel_date_range) == 1:
             filtered_df = filtered_df[filtered_df['Date'] == sel_date_range[0]]
 
-        # שינוי פורמט התאריך בטבלה עצמה לפני התצוגה
+        # תיקון תצוגת הטבלה: הפיכת התאריך לטקסט בפורמט DD-MM-YYYY לפני הצגה
         display_df = filtered_df.copy()
         display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime("%d-%m-%Y"))
 
