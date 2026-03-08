@@ -1,57 +1,60 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, sqlite3
+import smtplib, time, io, sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף
-st.set_page_config(page_title="TMC Billing Dashboard", layout="centered")
+# הגדרות דף - נקי ומהודק
+st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-# --- ניהול דשבורד (SQLite) ---
+# --- ניהול היסטוריה בבסיס נתונים ---
 def init_db():
-    conn = sqlite3.connect('billing_dashboard.db')
+    conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
-    # הוספת עמודה לכמות קבצים
     c.execute('''CREATE TABLE IF NOT EXISTS history 
-                 (date TEXT, company TEXT, emails_sent INTEGER, files_count INTEGER)''')
+                 (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)''')
     conn.commit()
     conn.close()
 
-def add_to_dashboard(company, email_count, files_count):
-    conn = sqlite3.connect('billing_dashboard.db')
+def add_to_history(company, recipients, files):
+    conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
     c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
-              (datetime.now().strftime("%Y-%m-%d"), company, email_count, files_count))
+              (datetime.now().strftime("%d/%m/%Y"), company, recipients, files))
     conn.commit()
     conn.close()
 
-def get_dashboard_data():
-    conn = sqlite3.connect('billing_dashboard.db')
+def get_history():
+    conn = sqlite3.connect('billing_history.db')
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
-    # המרה לפורמט תאריך של פנדס לצורך פילטור
-    if not df.empty:
-        df['date'] = pd.to_datetime(df['date']).dt.date
     return df
 
 init_db()
 
-# עיצוב CSS
 st.markdown("""
     <style>
-    .block-container { padding-top: 2rem; }
-    .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
-    .filter-box { background-color: #f9f9f9; padding: 15px; border-radius: 10px; border: 1px solid #ddd; margin-bottom: 20px; }
+    .block-container { padding-top: 3rem; padding-bottom: 0rem; }
+    h1 { margin-top: 1rem !important; margin-bottom: 1rem !important; }
+    .stVerticalBlock { gap: 0.6rem; }
+    hr { margin: 0.6em 0px; }
+    .stExpander { margin-top: 28px !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("TMC Billing System")
 
-# --- חלק 1 + 2: תפעול ופרטי שולח (נשאר כפי שהיה) ---
-st.subheader("1. Operation Center")
+def play_sound(sound_type):
+    sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3" if sound_type == "success" else "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
+    audio_html = f'<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>'
+    st.components.v1.html(audio_html, height=0)
+
+# --- חלק 1: הגדרות וקבצים ---
+st.subheader("1. Setup & Files")
 c1, c2 = st.columns([2, 1])
+
 with c1:
     up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
 with c2:
@@ -63,23 +66,32 @@ with c2:
     sel_y = yc.selectbox("Year", years, index=1)
     current_month_year = f"{sel_m} {sel_y}"
 
-uploaded_files = st.file_uploader("Upload Invoices/Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
+# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
-user_mail = sc1.text_input("Gmail Address", placeholder="your-email@gmail.com")
+user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
+
 with sc3:
     with st.expander("🔑 How to create an App Password?"):
-        st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth ON\n3. Search 'App passwords'\n4. Create & Copy code.")
+        st.markdown("""
+        To send emails via Gmail, you need an **App Password**.
+        1. [Google Security](https://myaccount.google.com/security).
+        2. 2-Step Verification: **ON**.
+        3. Search **'App passwords'**.
+        4. Copy the **16-character code**.
+        """)
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-# --- לוגיקה לשליחה ---
+# --- לוגיקה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
-    if not up_ex or not uploaded_files or not user_mail:
-        st.error("Missing information!")
+    if not uploaded_files or not up_ex or not user_mail or not user_pass:
+        st.error("Missing information! Please check all fields and files.")
+        play_sound("error")
     else:
         try:
             df = pd.read_excel(up_ex)
@@ -92,80 +104,65 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             for i, row in df.iterrows():
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
+                day_val = str(row.iloc[2]).strip() if len(df.columns) > 2 else "10"
+                due_date = f"{day_val} {current_month_year}"
                 
                 company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                 
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    msg.attach(MIMEText(f"Attached files for {company}.", 'plain'))
+                    body = f"Hi,\n\nAttached are the invoice and report for {company}.\nPayment is due by {due_date}.\n\nBest Regards,\nTMC Team"
+                    msg.attach(MIMEText(body, 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                         msg.attach(part)
                     server.send_message(msg)
                     sent_count += 1
-                    # שמירה לדשבורד כולל כמות קבצים
-                    add_to_dashboard(company, len(emails), len(company_files))
+                    add_to_history(company, len(emails), len(company_files))
                 
                 prog.progress((i + 1) / len(df))
+            
             server.quit()
-            st.success(f"Done! {sent_count} emails delivered.")
-            st.rerun()
+            if sent_count > 0:
+                st.success(f"Successfully sent {sent_count} emails!")
+                play_sound("success")
+                st.balloons()
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("0 emails were sent. No matching files found.")
+                play_sound("error")
         except Exception as e:
             st.error(f"Error: {e}")
+            play_sound("error")
 
-# --- חלק 3: דשבורד עם סננים (Dashboard with Filters) ---
+# --- חלק 3: היסטוריה בסגנון אקסל ---
 st.write("---")
-st.subheader("📊 Sending Dashboard")
+history_df = get_history()
 
-dash_df = get_dashboard_data()
-
-if not dash_df.empty:
-    # תיבת סננים
-    st.markdown('<div class="filter-box">', unsafe_allow_html=True)
-    f1, f2, f3 = st.columns(3)
-    
-    with f1:
-        search_company = st.text_input("🔍 Filter by Company", "")
-    with f2:
-        date_range = st.date_input("📅 Filter by Date Range", [])
-    with f3:
-        min_files = st.number_input("📎 Min Files Count", min_value=0, value=0)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # החלת הפילטרים על המידע
-    filtered_df = dash_df.copy()
-    
-    if search_company:
-        filtered_df = filtered_df[filtered_df['company'].str.contains(search_company, case=False, na=False)]
-    
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        filtered_df = filtered_df[(filtered_df['date'] >= start_date) & (filtered_df['date'] <= end_date)]
-    
-    if min_files > 0:
-        filtered_df = filtered_df[filtered_df['files_count'] >= min_files]
-
-    # כרטיסיות מידע מעודכנות לפי הפילטר
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Companies (Filtered)", len(filtered_df['company'].unique()))
-    m2.metric("Total Emails", filtered_df['emails_sent'].sum())
-    m3.metric("Total Files Sent", filtered_df['files_count'].sum())
-
-    # הצגת הטבלה המסוננת
-    st.dataframe(filtered_df, use_container_width=True, column_config={
-        "date": "Date",
-        "company": "Company Name",
-        "emails_sent": "Recipients",
-        "files_count": "Files Attached"
-    })
-    
-    if st.button("🗑️ Reset All Data"):
-        conn = sqlite3.connect('billing_dashboard.db')
-        conn.cursor().execute("DELETE FROM history")
-        conn.commit()
-        conn.close()
-        st.rerun()
+if not history_df.empty:
+    with st.expander("📊 View Sending History (Excel Style Table)"):
+        st.write("Click on headers to sort. Use the search icon or hover to filter.")
+        # שימוש ב-st.dataframe שנותן פיצ'רים של אקסל (מיון, חיפוש, סינון)
+        st.dataframe(
+            history_df, 
+            use_container_width=True, 
+            hide_index=True,
+            column_config={
+                "Date": st.column_config.TextColumn("Date"),
+                "Company": st.column_config.TextColumn("Company"),
+                "Recipients": st.column_config.NumberColumn("Recipients"),
+                "Files": st.column_config.NumberColumn("Files Attached")
+            }
+        )
+        
+        if st.button("🗑️ Clear History"):
+            conn = sqlite3.connect('billing_history.db')
+            conn.cursor().execute("DELETE FROM history")
+            conn.commit()
+            conn.close()
+            st.rerun()
 else:
-    st.info("No activity recorded yet.")
+    st.info("No sending history found yet.")
