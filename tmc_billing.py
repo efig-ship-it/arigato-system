@@ -6,30 +6,33 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף וצמצום רווחים דרך CSS
+# הגדרות דף - עיצוב מהודק עם מרווח עליון תקין
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
 st.markdown("""
     <style>
-    /* צמצום רווחים כללי בין אלמנטים */
+    /* מרווח עליון מאוזן שהכותרת תיראה טוב */
     .block-container {
-        padding-top: 1rem;
+        padding-top: 3rem;
         padding-bottom: 0rem;
     }
+    /* מרווח ספציפי מעל ומתחת לכותרת הראשית */
+    h1 {
+        margin-top: 1rem !important;
+        margin-bottom: 1rem !important;
+        padding-bottom: 5px;
+    }
+    /* צמצום מרווחים בין שאר האלמנטים */
     .stVerticalBlock {
-        gap: 0.5rem;
+        gap: 0.7rem;
     }
     hr {
-        margin: 0.5em 0px;
-    }
-    /* הסרת רווחים מיותרים בכותרות */
-    h1, h2, h3 {
-        margin-bottom: -0.5rem;
+        margin: 0.8em 0px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# כותרת ללא סמל המלון
+# כותרת נקייה
 st.title("TMC Billing System")
 
 # פונקציה להשמעת צלילים
