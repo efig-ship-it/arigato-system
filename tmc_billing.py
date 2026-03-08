@@ -1,15 +1,15 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, io, sqlite3
+import smtplib, time, sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף - נקי ומהודק
+# הגדרות דף - TMC Billing System
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-# --- ניהול היסטוריה בבסיס נתונים ---
+# --- ניהול בסיס נתונים להיסטוריה ---
 def init_db():
     conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
@@ -34,6 +34,7 @@ def get_history():
 
 init_db()
 
+# עיצוב CSS לצמצום רווחים ומראה נקי
 st.markdown("""
     <style>
     .block-container { padding-top: 3rem; padding-bottom: 0rem; }
@@ -78,7 +79,6 @@ user_pass = sc2.text_input("App Password", type="password")
 with sc3:
     with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
-        To send emails via Gmail, you need an **App Password**.
         1. [Google Security](https://myaccount.google.com/security).
         2. 2-Step Verification: **ON**.
         3. Search **'App passwords'**.
@@ -87,10 +87,10 @@ with sc3:
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-# --- לוגיקה ---
+# --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
     if not uploaded_files or not up_ex or not user_mail or not user_pass:
-        st.error("Missing information! Please check all fields and files.")
+        st.error("Missing information!")
         play_sound("error")
     else:
         try:
@@ -112,8 +112,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    body = f"Hi,\n\nAttached are the invoice and report for {company}.\nPayment is due by {due_date}.\n\nBest Regards,\nTMC Team"
-                    msg.attach(MIMEText(body, 'plain'))
+                    msg.attach(MIMEText(f"Attached files for {company}.", 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -125,40 +124,38 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 prog.progress((i + 1) / len(df))
             
             server.quit()
-            if sent_count > 0:
-                st.success(f"Successfully sent {sent_count} emails!")
-                play_sound("success")
-                st.balloons()
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("0 emails were sent. No matching files found.")
-                play_sound("error")
+            st.success(f"Successfully sent {sent_count} emails!")
+            play_sound("success")
+            st.balloons()
+            time.sleep(1)
+            st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
             play_sound("error")
 
-# --- חלק 3: היסטוריה בסגנון אקסל ---
+# --- חלק 3: היסטוריה עם סינון וחיפוש מובנה ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    with st.expander("📊 View Sending History (Excel Style Table)"):
-        st.write("Click on headers to sort. Use the search icon or hover to filter.")
-        # שימוש ב-st.dataframe שנותן פיצ'רים של אקסל (מיון, חיפוש, סינון)
-        st.dataframe(
-            history_df, 
-            use_container_width=True, 
+    with st.expander("📊 Permanent Sending History (Searchable Table)"):
+        st.info("💡 Tip: Click any header to sort. Use the search bar at the top right of the table to filter.")
+        
+        # שימוש ב-st.data_editor המאפשר פונקציות מתקדמות של טבלה
+        st.data_editor(
+            history_df,
+            use_container_width=True,
             hide_index=True,
+            disabled=True, # מונע עריכה ידנית, רק לצפייה וסינון
             column_config={
                 "Date": st.column_config.TextColumn("Date"),
                 "Company": st.column_config.TextColumn("Company"),
                 "Recipients": st.column_config.NumberColumn("Recipients"),
-                "Files": st.column_config.NumberColumn("Files Attached")
+                "Files": st.column_config.NumberColumn("Files Sent")
             }
         )
         
-        if st.button("🗑️ Clear History"):
+        if st.button("🗑️ Clear All History"):
             conn = sqlite3.connect('billing_history.db')
             conn.cursor().execute("DELETE FROM history")
             conn.commit()
