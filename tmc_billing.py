@@ -21,6 +21,7 @@ def init_db():
 def add_to_history(company, recipients, files):
     conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
+    # שמירה בפורמט ISO (YYYY-MM-DD) לצרכי חישוב, התצוגה תשתנה בהמשך
     c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
               (datetime.now().strftime("%Y-%m-%d"), company, recipients, files))
     conn.commit()
@@ -31,6 +32,7 @@ def get_history():
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
     if not df.empty:
+        # המרה לאובייקט תאריך
         df['Date'] = pd.to_datetime(df['Date']).dt.date
     return df
 
@@ -45,7 +47,6 @@ st.markdown("""
     hr { margin: 0.5em 0px; }
     .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
     
-    /* מרכוז כותרת ה-Due Date */
     .due-date-container {
         display: flex;
         justify-content: center;
@@ -68,7 +69,6 @@ c1, c2 = st.columns([2, 1])
 with c1:
     up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
 with c2:
-    # יצירת כותרת ממרכזת
     st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
     mc, yc = st.columns(2)
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -103,7 +103,7 @@ user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {curren
 # --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
     if not up_ex or not uploaded_files or not user_mail or not user_pass:
-        st.error("Please fill all fields and upload files.")
+        st.error("Missing fields or files!")
     else:
         try:
             df = pd.read_excel(up_ex)
@@ -146,7 +146,10 @@ if not history_df.empty:
     m1, m2, m3 = st.columns(3)
     m1.metric("Companies", len(history_df['Company'].unique()))
     m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-    m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d/%m/%Y"))
+    
+    # שינוי תצוגת התאריך האחרון לפורמט DD-MM-YYYY
+    last_sent_formatted = history_df['Date'].iloc[0].strftime("%d-%m-%Y")
+    m3.metric("Last Sent", last_sent_formatted)
 
     with st.expander("📊 View History & Filters", expanded=True):
         f1, f2 = st.columns([1.5, 1])
@@ -162,7 +165,11 @@ if not history_df.empty:
         elif len(sel_date_range) == 1:
             filtered_df = filtered_df[filtered_df['Date'] == sel_date_range[0]]
 
-        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+        # שינוי פורמט התאריך בטבלה עצמה לפני התצוגה
+        display_df = filtered_df.copy()
+        display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime("%d-%m-%Y"))
+
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
         
         if st.button("🗑️ Reset History"):
             conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
