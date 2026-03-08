@@ -38,13 +38,13 @@ init_db()
 st.markdown("""
     <style>
     .block-container { padding-top: 3rem; }
-    .stExpander { margin-top: 20px !important; }
+    .filter-row { background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("TMC Billing System")
 
-# --- חלק 1 + 2 (הגדרות ושולח) ---
+# --- חלק 1 + 2 (הגדרות ופרטי שולח - ללא שינוי) ---
 st.subheader("1. Setup & Files")
 c1, c2 = st.columns([2, 1])
 with c1:
@@ -109,40 +109,52 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: היסטוריה עם סינון אקטיבי ---
+# --- חלק 3: דשבורד עם סננים בסגנון אקסל ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    st.subheader("📊 Sending Logs")
+    st.subheader("📊 Sending Logs & History")
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Companies", len(history_df['Company'].unique()))
-    m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-    m3.metric("Last Sending", history_df['Date'].iloc[0])
+    # "שורת סננים" - כאן קורה הקסם של אקסל
+    with st.container():
+        st.write("🔍 **Excel-Style Filters:**")
+        f1, f2 = st.columns(2)
+        
+        # סנן חברה (כמו ה-Dropdown באקסל)
+        companies = sorted(history_df['Company'].unique())
+        selected_companies = f1.multiselect("Filter by Company", options=companies, default=[])
+        
+        # סנן תאריך
+        dates = sorted(history_df['Date'].unique(), reverse=True)
+        selected_dates = f2.multiselect("Filter by Date", options=dates, default=[])
 
-    with st.expander("📝 View History (With Row Filters)"):
-        st.write("🔍 **To Filter:** Use the magnifying glass icon or the filter bar that appears on the table.")
-        
-        # הטבלה עם רכיב הסינון המובנה
-        st.dataframe(
-            history_df,
-            use_container_width=True,
-            hide_index=True,
-            # הפעלת סרגל סינון (זמין בגרסאות Streamlit חדשות)
-            column_config={
-                "Date": st.column_config.TextColumn("Date 📅"),
-                "Company": st.column_config.TextColumn("Company 🏢"),
-                "Recipients": st.column_config.NumberColumn("Recipients"),
-                "Files": st.column_config.NumberColumn("Files")
-            }
-        )
-        
-        if st.button("🗑️ Clear History"):
-            conn = sqlite3.connect('billing_history.db')
-            conn.cursor().execute("DELETE FROM history")
-            conn.commit()
-            conn.close()
-            st.rerun()
+    # החלת הסינון על הטבלה
+    filtered_df = history_df.copy()
+    if selected_companies:
+        filtered_df = filtered_df[filtered_df['Company'].isin(selected_companies)]
+    if selected_dates:
+        filtered_df = filtered_df[filtered_df['Date'].isin(selected_dates)]
+
+    # הצגת הטבלה המסוננת
+    st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Date": st.column_config.TextColumn("Date 📅"),
+            "Company": st.column_config.TextColumn("Company 🏢"),
+            "Recipients": st.column_config.NumberColumn("Recipients"),
+            "Files": st.column_config.NumberColumn("Files")
+        }
+    )
+    
+    # כפתור מחיקה בתחתית
+    if st.button("🗑️ Reset All History"):
+        conn = sqlite3.connect('billing_history.db')
+        conn.cursor().execute("DELETE FROM history")
+        conn.commit()
+        conn.close()
+        st.rerun()
 else:
     st.info("No activity recorded yet.")
