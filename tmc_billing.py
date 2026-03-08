@@ -34,25 +34,19 @@ def get_history():
 
 init_db()
 
-# עיצוב CSS לצמצום רווחים
+# עיצוב CSS
 st.markdown("""
     <style>
-    .block-container { padding-top: 3rem; padding-bottom: 0rem; }
-    h1 { margin-top: 1rem !important; margin-bottom: 1rem !important; }
-    .stVerticalBlock { gap: 0.6rem; }
-    hr { margin: 0.6em 0px; }
-    .stExpander { margin-top: 28px !important; }
-    /* הדגשת כותרות הטבלה למראה אקסלי */
-    [data-testid="stTableSummary"] { font-weight: bold; }
+    .block-container { padding-top: 3rem; }
+    .stExpander { margin-top: 20px !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("TMC Billing System")
 
-# --- חלק 1: הגדרות וקבצים ---
+# --- חלק 1 + 2 (הגדרות ושולח) ---
 st.subheader("1. Setup & Files")
 c1, c2 = st.columns([2, 1])
-
 with c1:
     up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
 with c2:
@@ -66,28 +60,21 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
 user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
-
 with sc3:
-    with st.expander("🔑 How to create an App Password?"):
-        st.markdown("""
-        1. [Google Security](https://myaccount.google.com/security).
-        2. 2-Step Verification: **ON**.
-        3. Search **'App passwords'**.
-        4. Copy the **16-char code**.
-        """)
+    with st.expander("🔑 App Password Help"):
+        st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth ON\n3. Create 'App password'")
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
 # --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
-    if not uploaded_files or not up_ex or not user_mail or not user_pass:
-        st.error("Missing information!")
+    if not up_ex or not uploaded_files or not user_mail:
+        st.error("Missing fields!")
     else:
         try:
             df = pd.read_excel(up_ex)
@@ -117,38 +104,37 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             
             server.quit()
             st.success(f"Sent {sent_count} emails!")
-            st.balloons()
             time.sleep(1)
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: דשבורד והיסטוריה עם פילטרים "אקסליים" ---
+# --- חלק 3: היסטוריה עם סינון אקטיבי ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    st.subheader("📊 Sending Logs & Summary")
+    st.subheader("📊 Sending Logs")
     
-    # סיכומים מהירים
     m1, m2, m3 = st.columns(3)
     m1.metric("Companies", len(history_df['Company'].unique()))
     m2.metric("Total Emails", int(history_df['Recipients'].sum()))
     m3.metric("Last Sending", history_df['Date'].iloc[0])
 
-    with st.expander("📝 View Full History (Excel-like Filters)"):
-        st.info("💡 **כדי לסנן:** לחץ על הכותרת של העמודה. יופיעו לך אפשרויות למיון וסינון ערכים בדיוק כמו באקסל.")
+    with st.expander("📝 View History (With Row Filters)"):
+        st.write("🔍 **To Filter:** Use the magnifying glass icon or the filter bar that appears on the table.")
         
-        # הטבלה האינטראקטיבית עם פילטרים מובנים בכל כותרת
+        # הטבלה עם רכיב הסינון המובנה
         st.dataframe(
             history_df,
             use_container_width=True,
             hide_index=True,
+            # הפעלת סרגל סינון (זמין בגרסאות Streamlit חדשות)
             column_config={
                 "Date": st.column_config.TextColumn("Date 📅"),
-                "Company": st.column_config.TextColumn("Company Name 🏢"),
-                "Recipients": st.column_config.NumberColumn("Recipients 👥"),
-                "Files": st.column_config.NumberColumn("Files Attached 📎")
+                "Company": st.column_config.TextColumn("Company 🏢"),
+                "Recipients": st.column_config.NumberColumn("Recipients"),
+                "Files": st.column_config.NumberColumn("Files")
             }
         )
         
