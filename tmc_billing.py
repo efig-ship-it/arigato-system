@@ -1,42 +1,46 @@
 import streamlit as st
 import pandas as pd
-import os, smtplib, time, io
+import smtplib, time, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 
-# הגדרות דף - מראה נקי ומקצועי
+# הגדרות דף
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-# כותרת המערכת
 st.title("TMC Billing System")
 st.write("---")
 
-# חלק 1: העלאת קבצים והגדרות חודש
-st.header("1. Upload & Configuration")
+# חלק 1: העלאת קבצים
+st.header("1. Upload Files")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("**Upload Excel Database**")
-    # העלאת קובץ האקסל ישירות לממשק (במקום נתיב קבוע)
-    up_ex = st.file_uploader("Upload Excel", type=['xlsx'], label_visibility="collapsed")
+    st.markdown("**1. Upload Mailing List**")
+    up_ex = st.file_uploader("Upload Excel List", type=['xlsx'], label_visibility="collapsed")
     
 with col2:
-    current_month_year = st.text_input("Current Month & Year", value="March 2024")
+    st.markdown("**2. Current Month & Year**")
+    current_month_year = st.text_input("Month/Year", value="March 2026", label_visibility="collapsed")
 
-# הגדרת נתיב התיקייה בדרייב (לחיפוש החשבוניות)
-base_path = st.text_input("Google Drive Invoices Path:", 
-                         value=f"/content/drive/MyDrive/Invoices_Folders/{current_month_year}/")
+st.markdown("**3. Upload all Invoices & Reports (PDF/Excel)**")
+# העלאה מרובה של קבצים
+uploaded_files = st.file_uploader("Drag and drop all files here", 
+                                 type=['pdf', 'xlsx', 'xls'], 
+                                 accept_multiple_files=True,
+                                 label_visibility="collapsed")
+
+if uploaded_files:
+    st.info(f"📂 {len(uploaded_files)} files uploaded. The system will match them to companies automatically.")
 
 st.write("---")
 
 # חלק 2: פרטי שולח והסבר סיסמה
 st.header("2. Sender Details")
 
-user_mail = st.text_input("Your Gmail Address:", value="galo@arbitrip.com")
+user_mail = st.text_input("Your Gmail Address:", placeholder="example@gmail.com")
 user_pass = st.text_input("App Password:", type="password")
 
-# רכיב מתקפל עם ההסבר לבקשתך
 with st.expander("🔑 How to create an App Password for TMC?"):
     st.markdown("""
     To send emails via Gmail, you need a unique **App Password**. 
@@ -44,36 +48,33 @@ with st.expander("🔑 How to create an App Password for TMC?"):
     
     1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
     2. Make sure **2-Step Verification** is turned **ON**.
-    3. Scroll down or search for **'App passwords'**.
-    4. Select an app name (e.g., "TMC Billing") and click **Create**.
-    5. Copy the **16-character code** (without spaces) and paste it in the field above.
+    3. Search for **'App passwords'** in the top search bar.
+    4. Select a name (e.g., "TMC Billing") and click **Create**.
+    5. Copy the **16-character code** and paste it above.
     """)
 
-email_subject = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
+user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
 
 st.write("---")
 
-# פונקציות עזר
-def find_files_for_company(company_name, folder_root):
-    folder_path = os.path.join(folder_root, company_name)
-    pdf_file, excel_file = None, None
-    if not os.path.exists(folder_path):
-        return None, None, folder_path
+# לוגיקת התאמת קבצים
+def get_files_for_company(company_name, files_list):
+    """מחפש קבצים שהשם שלהם מכיל את שם החברה"""
+    matched_files = []
+    # מנקה רווחים והופך לאותיות קטנות להשוואה טובה יותר
+    search_name = company_name.strip().lower()
     
-    for filename in os.listdir(folder_path):
-        lower_name = filename.lower()
-        full_path = os.path.join(folder_path, filename)
-        if lower_name.endswith('.pdf') and not pdf_file:
-            pdf_file = full_path
-        elif (lower_name.endswith('.xlsx') or lower_name.endswith('.xls')) and not excel_file:
-            excel_file = full_path
-    return pdf_file, excel_file, folder_path
+    for uploaded_file in files_list:
+        if search_name in uploaded_file.name.lower():
+            matched_files.append(uploaded_file)
+            
+    return matched_files
 
 # כפתור הפעלה
 if st.button("Start Bulk Sending", use_container_width=True):
-    if up_ex and user_mail and user_pass:
+    if up_ex and uploaded_files and user_mail and user_pass:
         try:
-            # קריאת האקסל שהועלה
+            # קריאת האקסל הראשי
             df = pd.read_excel(up_ex)
             prog = st.progress(0)
             status = st.empty()
@@ -84,44 +85,47 @@ if st.button("Start Bulk Sending", use_container_width=True):
             server.login(user_mail.strip(), user_pass.replace(" ", ""))
             
             sent_count = 0
+            total_rows = len(df)
+
             for i, row in df.iterrows():
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                 day_val = str(row.iloc[2]).strip() if len(row.columns) > 2 else "10"
-                full_due_date = f"{day_val} {current_month_year}"
+                due_date = f"{day_val} {current_month_year}"
                 
-                # חיפוש קבצים בנתיב הדרייב שהוזן
-                pdf_p, excel_p, f_path = find_files_for_company(company, base_path)
+                # חיפוש קבצים מתוך הרשימה שהועלתה
+                company_files = get_files_for_company(company, uploaded_files)
                 
-                if pdf_p and excel_p:
+                if company_files:
                     msg = MIMEMultipart()
                     msg['From'] = user_mail
                     msg['To'] = ", ".join(emails)
-                    msg['Subject'] = f"{email_subject} - {company}"
+                    msg['Subject'] = f"{user_subj} - {company}"
                     
-                    body = f"Hi,\n\nAttached is the report and invoice for {company}.\nPayment is due by {full_due_date}.\n\nBest Regards,\nTMC Team"
-                    msg.attach(MIMEText(body, 'plain'))
+                    body = f"Hi,\n\nAttached are the invoice and report for {company}.\nPayment is due by {due_date}.\n\nBest Regards,\nTMC Team"
+                    msg.attach(MIMEText(body, 'plain', 'utf-8'))
                     
-                    for p in [pdf_p, excel_p]:
-                        with open(p, "rb") as f:
-                            part = MIMEApplication(f.read(), Name=os.path.basename(p))
-                            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(p)}"'
-                            msg.attach(part)
+                    # צירוף הקבצים שנמצאו
+                    for f in company_files:
+                        # קריאת תוכן הקובץ מהזיכרון
+                        part = MIMEApplication(f.getvalue(), Name=f.name)
+                        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+                        msg.attach(part)
                     
                     server.sendmail(user_mail, emails, msg.as_string())
                     sent_count += 1
                     status.text(f"✅ Sent to: {company}")
                 else:
-                    st.error(f"❌ Missing files for {company} in {f_path}")
-                
-                prog.progress((i + 1) / len(df))
+                    st.warning(f"⚠️ No files found for {company}. Skipping...")
+
+                prog.progress((i + 1) / total_rows)
                 time.sleep(0.1)
-                
+
             server.quit()
-            st.success(f"Finished! Total {sent_count} emails sent.")
+            st.success(f"Successfully sent {sent_count} emails!")
             st.balloons()
-            
+
         except Exception as e:
             st.error(f"Error: {e}")
     else:
-        st.warning("Please upload Excel and fill in all details.")
+        st.warning("Please upload the mailing list and the invoice files.")
