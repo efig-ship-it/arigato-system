@@ -34,19 +34,17 @@ def get_dashboard_data():
 
 init_db()
 
-# --- עיצוב CSS ---
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; }
     .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; }
-    .stExpander { margin-top: 20px !important; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("TMC Billing System")
 
-# --- חלק 1: תפעול (Setup & Files) ---
-st.subheader("⚙️ Operation Center")
+# --- חלק 1: הגדרות וקבצים ---
+st.subheader("1. Operation Center")
 c1, c2 = st.columns([2, 1])
 
 with c1:
@@ -63,24 +61,30 @@ with c2:
 uploaded_files = st.file_uploader("Upload Invoices/Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
 st.write("---")
-st.subheader("📧 Sender Details")
+st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
-user_mail = sc1.text_input("Gmail Address")
+
+# כאן חשוב להקליד מייל אמיתי
+user_mail = sc1.text_input("Gmail Address", placeholder="your-email@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
+
 with sc3:
     with st.expander("🔑 App Password Help"):
         st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth ON\n3. Create 'App password'")
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-def get_files_for_company(company_name, files_list):
-    search_name = str(company_name).strip().lower()
-    return [f for f in files_list if search_name in f.name.lower()]
-
-# כפתור הפעלה
+# --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
-    if not up_ex or not uploaded_files or not user_mail:
-        st.error("Missing fields or files!")
+    # בדיקה מפורטת - מה חסר?
+    missing = []
+    if not up_ex: missing.append("Mailing List (Excel)")
+    if not uploaded_files: missing.append("Invoice Files")
+    if not user_mail: missing.append("Gmail Address")
+    if not user_pass: missing.append("App Password")
+    
+    if missing:
+        st.error(f"⚠️ Missing Information: {', '.join(missing)}")
     else:
         try:
             df = pd.read_excel(up_ex)
@@ -93,53 +97,41 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             for i, row in df.iterrows():
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
-                day_val = str(row.iloc[2]).strip() if len(df.columns) > 2 else "10"
-                due_date = f"{day_val} {current_month_year}"
                 
-                company_files = get_files_for_company(company, uploaded_files)
+                # חיפוש קבצים שמתאימים לשם החברה
+                company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
+                
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    msg.attach(MIMEText(f"Attached files for {company}. Due: {due_date}", 'plain'))
+                    msg.attach(MIMEText(f"Hi, attached are files for {company}.", 'plain'))
+                    
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                         msg.attach(part)
+                        
                     server.send_message(msg)
                     sent_count += 1
-                    # שמירה לדשבורד
                     add_to_dashboard(company, len(emails))
+                
                 prog.progress((i + 1) / len(df))
+            
             server.quit()
-            st.success(f"Sent {sent_count} emails!")
+            st.success(f"Done! {sent_count} emails delivered.")
             st.balloons()
             time.sleep(1)
             st.rerun()
+            
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"❌ Error: {e}")
 
-# --- חלק 3: דשבורד (Dashboard) ---
+# --- דשבורד ---
 st.write("---")
-st.subheader("📊 Sending Dashboard")
-
 dash_df = get_dashboard_data()
-
 if not dash_df.empty:
-    # כרטיסיות מידע (Metrics)
-    m1, m2, m3 = st.columns(3)
+    st.subheader("📊 Sending Dashboard")
+    m1, m2 = st.columns(2)
     m1.metric("Total Companies", len(dash_df['company'].unique()))
-    m2.metric("Total Emails Sent", dash_df['emails_sent'].sum())
-    m3.metric("Last Sending Date", dash_df['date'].iloc[0])
-
-    # טבלת פירוט בתוך Expander
-    with st.expander("📝 Full Activity Log"):
-        st.dataframe(dash_df, use_container_width=True)
-    
-    if st.button("🗑️ Reset Dashboard Data"):
-        conn = sqlite3.connect('billing_dashboard.db')
-        conn.cursor().execute("DELETE FROM history")
-        conn.commit()
-        conn.close()
-        st.rerun()
-else:
-    st.info("Dashboard is empty. Start sending to see data!")
+    m2.metric("Total Emails", dash_df['emails_sent'].sum())
+    st.dataframe(dash_df, use_container_width=True)
