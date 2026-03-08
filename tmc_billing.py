@@ -34,7 +34,7 @@ def get_history():
 
 init_db()
 
-# עיצוב CSS לצמצום רווחים ומראה נקי
+# עיצוב CSS לצמצום רווחים
 st.markdown("""
     <style>
     .block-container { padding-top: 3rem; padding-bottom: 0rem; }
@@ -42,7 +42,6 @@ st.markdown("""
     .stVerticalBlock { gap: 0.6rem; }
     hr { margin: 0.6em 0px; }
     .stExpander { margin-top: 28px !important; }
-    /* עיצוב לכרטיסיות הסיכום */
     [data-testid="stMetricValue"] { font-size: 24px; }
     </style>
     """, unsafe_allow_html=True)
@@ -79,16 +78,14 @@ user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
 
 with sc3:
-    # פירוט מלא של שלבי ה-App Password
     with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
-        To send emails via Gmail, you need a unique **App Password**.
-        *Standard login passwords will not work.*
+        To send emails via Gmail, you need an **App Password**.
 
-        1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-        2. Make sure **2-Step Verification** is turned **ON**.
-        3. Search for **'App passwords'** in the top search bar.
-        4. Select a name (e.g., "TMC Billing") and click **Create**.
+        1. Go to [**Google Account Security**](https://myaccount.google.com/security).
+        2. **2-Step Verification**: MUST be **ON**.
+        3. Search for **'App passwords'** at the top.
+        4. Create a name and click **Create**.
         5. Copy the **16-character code** and paste it here.
         """)
 
@@ -119,8 +116,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    body = f"Hi,\n\nAttached are the invoice and report for {company}.\nPayment is due by {due_date}.\n\nBest Regards,\nTMC Team"
-                    msg.attach(MIMEText(body, 'plain'))
+                    msg.attach(MIMEText(f"Hi,\n\nAttached are files for {company}.\nDue: {due_date}", 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -141,33 +137,32 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             st.error(f"Error: {e}")
             play_sound("error")
 
-# --- חלק 3: סיכום והיסטוריה חכמה ---
+# --- חלק 3: סיכום והיסטוריה עם סינון אקסלי ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    st.subheader("📊 Sending Summary & Logs")
+    st.subheader("📊 Sending Logs & Summary")
     
-    # שורת סיכום (Metrics)
+    # כרטיסיות סיכום
     m1, m2, m3 = st.columns(3)
-    m1.metric("Total Companies Serviced", len(history_df['Company'].unique()))
-    m2.metric("Total Emails Sent", int(history_df['Recipients'].sum()))
-    m3.metric("Last Send Date", history_df['Date'].iloc[0])
+    m1.metric("Companies", len(history_df['Company'].unique()))
+    m2.metric("Total Emails", int(history_df['Recipients'].sum()))
+    m3.metric("Last Sending", history_df['Date'].iloc[0])
 
-    with st.expander("📝 Full Activity Log (Excel Style with Filter)"):
-        st.info("💡 Tip: Click headers to sort or use the search icon in the table to filter.")
+    with st.expander("📝 View Full History (Search & Filter Table)"):
+        st.info("💡 **Tip:** Click on the magnifying glass 🔍 on any header to **Filter** by specific values.")
         
-        # טבלה אינטראקטיבית עם חיפוש ומיון פנימי
-        st.data_editor(
+        # שימוש ב-st.dataframe המודרני שמאפשר סינון מובנה
+        st.dataframe(
             history_df,
             use_container_width=True,
             hide_index=True,
-            disabled=True,
             column_config={
-                "Date": st.column_config.TextColumn("Date"),
+                "Date": st.column_config.TextColumn("Date (Filter)"),
                 "Company": st.column_config.TextColumn("Company Name"),
                 "Recipients": st.column_config.NumberColumn("Recipients"),
-                "Files": st.column_config.NumberColumn("Files Sent")
+                "Files": st.column_config.NumberColumn("Files Attached")
             }
         )
         
@@ -178,4 +173,4 @@ if not history_df.empty:
             conn.close()
             st.rerun()
 else:
-    st.info("No sending history found yet.")
+    st.info("No activity recorded yet.")
