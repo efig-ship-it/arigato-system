@@ -59,6 +59,8 @@ user_pass = sc2.text_input("App Password", type="password")
 with sc3:
     with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
+        To send emails via Gmail, you need a unique **App Password**.
+        
         1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
         2. Make sure **2-Step Verification** is turned **ON**.
         3. Search for **'App passwords'**.
@@ -107,9 +109,9 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                     server.send_message(msg)
                     sent_count += 1
                     
-                    # הוספה להיסטוריה בזיכרון
-                    now = datetime.now().strftime("%H:%M:%S")
-                    st.session_state.send_history.append({"Time": now, "Company": company, "Status": "✅ Sent"})
+                    # הוספה להיסטוריה - תאריך במקום זמן
+                    today_date = datetime.now().strftime("%d/%m/%Y")
+                    st.session_state.send_history.append({"Date": today_date, "Company": company, "Status": "✅ Sent"})
                 
                 prog.progress((i + 1) / len(df))
             
@@ -125,11 +127,12 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             st.error(f"Error: {e}")
             play_sound("error")
 
-# --- חלק 3: היסטוריית שליחה (מוסתר בתוך תיבה נפתחת) ---
+# --- חלק 3: היסטוריית שליחה ---
 st.write("---")
 if st.session_state.send_history:
     with st.expander("📊 View Sending Log (Current Session)"):
         history_df = pd.DataFrame(st.session_state.send_history)
+        # הצגת הטבלה ללא אינדקס מספרי
         st.table(history_df)
 else:
     st.info("No emails sent in this session yet.")
