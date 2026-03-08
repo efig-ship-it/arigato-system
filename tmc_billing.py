@@ -21,7 +21,6 @@ def init_db():
 def add_to_history(company, recipients, files):
     conn = sqlite3.connect('billing_history.db')
     c = conn.cursor()
-    # שמירה בפורמט ISO (YYYY-MM-DD) כדי שהפילטור יהיה קל יותר
     c.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
               (datetime.now().strftime("%Y-%m-%d"), company, recipients, files))
     conn.commit()
@@ -37,7 +36,7 @@ def get_history():
 
 init_db()
 
-# עיצוב CSS
+# עיצוב CSS לצמצום רווחים מקסימלי
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; padding-bottom: 0rem; }
@@ -45,6 +44,8 @@ st.markdown("""
     .stVerticalBlock { gap: 0.4rem; }
     hr { margin: 0.5em 0px; }
     .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
+    /* צמצום גובה שדות התאריך */
+    div[data-testid="stDateInput"] { margin-bottom: -10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -65,19 +66,23 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח ---
+# --- חלק 2: פרטי שולח (פירוט מלא נשמר) ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
 user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
 with sc3:
-    with st.expander("🔑 App Password Help"):
+    with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
-        1. [Google Security](https://myaccount.google.com/security)
-        2. 2-Step Auth: **ON**
-        3. Search **'App passwords'**
-        4. Create & Copy the **16-char code**
+        To send emails via Gmail, you need a unique **App Password**.
+        *Standard login passwords will not work.*
+
+        1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+        2. Make sure **2-Step Verification** is turned **ON**.
+        3. Search for **'App passwords'** in the top search bar.
+        4. Select a name (e.g., "TMC Billing") and click **Create**.
+        5. Copy the **16-character code** and paste it here.
         """)
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -103,7 +108,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    body = f"Attached are files for {company}.\nDue: {current_month_year}"
+                    body = f"Hi,\n\nAttached are files for {company}.\nDue: {current_month_year}"
                     msg.attach(MIMEText(body, 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
@@ -120,7 +125,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: דשבורד והיסטוריה עם לוח שנה ---
+# --- חלק 3: דשבורד והיסטוריה עם לוח שנה קומפקטי ---
 st.write("---")
 history_df = get_history()
 
@@ -131,21 +136,14 @@ if not history_df.empty:
     m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d/%m/%Y"))
 
     with st.expander("📊 View History & Filters", expanded=True):
-        f1, f2 = st.columns([1, 1.2])
-        
-        # סנן חברה (Multiselect)
-        sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()))
-        
-        # סנן תאריך (Calendar - Date Input)
-        sel_date_range = f2.date_input("Filter by Date Range", value=[], help="Select start and end date")
+        # סידור הסננים בשורה אחת צפופה
+        f1, f2 = st.columns([1.5, 1])
+        sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()), placeholder="Choose...")
+        sel_date_range = f2.date_input("Date Range", value=[], help="Start & End dates")
 
         filtered_df = history_df.copy()
-        
-        # החלת פילטר חברה
         if sel_comp:
             filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            
-        # החלת פילטר תאריך (Calendar)
         if len(sel_date_range) == 2:
             start_date, end_date = sel_date_range
             filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
