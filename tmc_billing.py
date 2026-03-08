@@ -6,97 +6,57 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף - TMC Billing System
+# הגדרות דף
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-st.title("TMC Billing System")
-st.write("---")
+st.title("🏨 TMC Billing System")
 
-# פונקציה להשמעת צלילים (הצלחה/כישלון)
+# פונקציה להשמעת צלילים
 def play_sound(sound_type):
-    if sound_type == "success":
-        sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3"
-    else:
-        sound_url = "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
-        
-    audio_html = f"""
-        <audio autoplay>
-            <source src="{sound_url}" type="audio/mp3">
-        </audio>
-    """
+    sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3" if sound_type == "success" else "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
+    audio_html = f'<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>'
     st.components.v1.html(audio_html, height=0)
 
-# חלק 1: העלאת קבצים ובחירת תאריך
-st.header("1. Upload Files")
-col1, col2 = st.columns(2)
+# --- חלק 1: הגדרות וקבצים (קומפקטי) ---
+st.subheader("1. Setup & Files")
+c1, c2 = st.columns([2, 1])
 
-with col1:
-    st.markdown("**1. Upload Mailing List (Excel)**")
-    up_ex = st.file_uploader("Upload Excel List", type=['xlsx'], label_visibility="collapsed")
+with c1:
+    up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
     
-with col2:
-    st.markdown("**2. Select Billing Period**")
-    # יצירת רשימת חודשים ושנים לבחירה
-    months = ["January", "February", "March", "April", "May", "June", 
-              "July", "August", "September", "October", "November", "December"]
+with c2:
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    curr_y = datetime.now().year
+    years = [str(y) for y in range(curr_y - 1, curr_y + 3)]
     
-    current_year = datetime.now().year
-    years = [str(y) for y in range(current_year - 1, current_year + 5)]
-    
-    # הצבת שתי תיבות בחירה קטנות אחת ליד השנייה
-    m_col, y_col = st.columns(2)
-    with m_col:
-        selected_month = st.selectbox("Month", options=months, index=datetime.now().month - 1, label_visibility="collapsed")
-    with y_col:
-        selected_year = st.selectbox("Year", options=years, index=1, label_visibility="collapsed")
-    
-    current_month_year = f"{selected_month} {selected_year}"
+    mc, yc = st.columns(2)
+    sel_m = mc.selectbox("Month", months, index=datetime.now().month - 1)
+    sel_y = yc.selectbox("Year", years, index=1)
+    current_month_year = f"{sel_m} {sel_y}"
 
-st.markdown("**3. Upload all Invoices & Reports (PDF/Excel)**")
-uploaded_files = st.file_uploader("Drag and drop all files here", 
-                                 type=['pdf', 'xlsx', 'xls'], 
-                                 accept_multiple_files=True,
-                                 label_visibility="collapsed")
+uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
+# --- חלק 2: פרטי שולח (קומפקטי בעמודות) ---
 st.write("---")
+st.subheader("2. Sender Details")
+sc1, sc2 = st.columns(2)
+user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
+user_pass = sc2.text_input("App Password", type="password")
 
-# חלק 2: פרטי שולח
-st.header("2. Sender Details")
-user_mail = st.text_input("Your Gmail Address:", placeholder="example@gmail.com")
-user_pass = st.text_input("App Password:", type="password")
+user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-# הסבר על ה-App Password
-with st.expander("How to create an App Password for TMC?"):
-    st.markdown("""
-    To send emails via Gmail, you need a unique **App Password**. 
-    *Standard login passwords will not work.*
-    
-    1. Go to your **Google Account Security**.
-    2. Make sure **2-Step Verification** is turned **ON**.
-    3. Search for **'App passwords'** in the top search bar.
-    4. Select a name (e.g., "TMC Billing") and click **Create**.
-    5. Copy the **16-character code** and paste it above.
-    """)
+with st.expander("🔑 How to create an App Password?"):
+    st.markdown("1. Go to Google Security. 2. 2-Step Verification ON. 3. Create 'App password'.")
 
-user_subj = st.text_input("Email Subject:", value=f"Invoice Payment Due - {current_month_year}")
-
-st.write("---")
-
+# --- לוגיקה וכפתור הפעלה ---
 def get_files_for_company(company_name, files_list):
-    matched_files = []
     search_name = str(company_name).strip().lower()
-    for uploaded_file in files_list:
-        if search_name in uploaded_file.name.lower():
-            matched_files.append(uploaded_file)
-    return matched_files
+    return [f for f in files_list if search_name in f.name.lower()]
 
-# כפתור הפעלה
-if st.button("Start Bulk Sending", use_container_width=True):
-    if not uploaded_files:
-        st.error("No files uploaded! Please upload the invoice/report files.")
-        play_sound("error")
-    
-    elif up_ex and user_mail and user_pass:
+if st.button("🚀 Start Bulk Sending", use_container_width=True):
+    if not uploaded_files or not up_ex or not user_mail or not user_pass:
+        st.warning("Please fill all fields and upload files.")
+    else:
         try:
             df = pd.read_excel(up_ex)
             prog = st.progress(0)
@@ -107,12 +67,9 @@ if st.button("Start Bulk Sending", use_container_width=True):
             server.login(user_mail.strip(), user_pass.replace(" ", ""))
             
             sent_count = 0
-            total_rows = len(df)
-
             for i, row in df.iterrows():
                 company = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
-                
                 day_val = str(row.iloc[2]).strip() if len(df.columns) > 2 else "10"
                 due_date = f"{day_val} {current_month_year}"
                 
@@ -120,37 +77,25 @@ if st.button("Start Bulk Sending", use_container_width=True):
                 
                 if company_files and emails:
                     msg = MIMEMultipart()
-                    msg['From'] = user_mail
-                    msg['To'] = ", ".join(emails)
-                    msg['Subject'] = f"{user_subj} - {company}"
-                    
+                    msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
                     body = f"Hi,\n\nAttached are the invoice and report for {company}.\nPayment is due by {due_date}.\n\nBest Regards,\nTMC Team"
-                    msg.attach(MIMEText(body, 'plain', 'utf-8'))
-                    
+                    msg.attach(MIMEText(body, 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                         msg.attach(part)
-                    
                     server.send_message(msg)
                     sent_count += 1
-                    status.text(f"Sent to: {company}")
-                
-                prog.progress((i + 1) / total_rows)
-                time.sleep(0.1)
-
+                prog.progress((i + 1) / len(df))
+            
             server.quit()
-
             if sent_count > 0:
-                st.success(f"Successfully sent {sent_count} emails for {current_month_year}!")
+                st.success(f"Sent {sent_count} emails!")
                 play_sound("success")
                 st.balloons()
             else:
-                st.error("0 emails were sent. No matching files found.")
+                st.error("No matches found.")
                 play_sound("error")
-
         except Exception as e:
             st.error(f"Error: {e}")
             play_sound("error")
-    else:
-        st.warning("Please fill in all details and upload the mailing list.")
