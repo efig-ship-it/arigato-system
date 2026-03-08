@@ -20,12 +20,11 @@ def init_db():
 
 init_db()
 
-# --- תפריט ניווט בצד (Sidebar) ---
-# כאן נמצא הקישור שחיפשת לעמוד השני
+# תפריט ניווט בצד (Sidebar)
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- עמוד 1: Email Sender (כל מה שהיה באתר נשאר כאן) ---
+# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""
         <style>
@@ -57,7 +56,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח (הפירוט המלא נשאר!)
+    # חלק 2: פרטי שולח
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -66,17 +65,23 @@ if page == "Email Sender":
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            *Standard login passwords will not work.*
-
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
+            1. Go to [**Google Security**](https://myaccount.google.com/security).
+            2. 2-Step Verification: **ON**.
+            3. Search for **'App passwords'**.
+            4. Copy the **16-char code**.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
+
+    # בדיקת כפילויות (Duplicate Warning)
+    if up_ex:
+        conn = sqlite3.connect('billing_history.db')
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        already_sent = pd.read_sql_query(f"SELECT Company FROM history WHERE Date='{today_str}'", conn)['Company'].tolist()
+        conn.close()
+        
+        if already_sent:
+            st.warning(f"⚠️ Note: You already sent emails today to: {', '.join(already_sent)}")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True):
         if up_ex and uploaded_files and user_mail:
@@ -96,7 +101,7 @@ if page == "Email Sender":
                     if files and emails:
                         msg = MIMEMultipart()
                         msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                        msg.attach(MIMEText(f"Hi,\n\nAttached are files for {company}.\nDue: {current_month_year}", 'plain'))
+                        msg.attach(MIMEText(f"Attached are files for {company}.\nDue: {current_month_year}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -118,7 +123,7 @@ if page == "Email Sender":
         else:
             st.error("Missing fields or files!")
 
-    # חלק 3: היסטוריה המקורית (נשארת בדף הראשי)
+    # חלק 3: היסטוריה מהירה
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
@@ -131,22 +136,7 @@ if page == "Email Sender":
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
         m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d-%m-%Y"))
 
-        with st.expander("📊 View History & Filters", expanded=True):
-            f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()), placeholder="Choose...")
-            sel_date_range = f2.date_input("Date Range", value=[], help="Start & End dates")
-
-            filtered_df = history_df.copy()
-            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            if len(sel_date_range) == 2:
-                start_date, end_date = sel_date_range
-                filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
-            
-            display_df = filtered_df.copy()
-            display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime("%d-%m-%Y"))
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-# --- עמוד 2: Analytics Dashboard (הדף החדש שחיפשת) ---
+# --- עמוד 2: Analytics Dashboard (הכלים החדשים כאן) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     
@@ -157,17 +147,39 @@ elif page == "Analytics Dashboard":
     if not df_raw.empty:
         df_raw['Date'] = pd.to_datetime(df_raw['Date'])
         
-        # סיכומים מהירים (KPIs)
-        st.subheader("Summary Statistics")
-        k1, k2, k3 = st.columns(3)
-        k1.metric("Total Emails Sent", f"{int(df_raw['Recipients'].sum())}")
-        k2.metric("Unique Clients", len(df_raw['Company'].unique()))
-        k3.metric("Total Files Delivered", int(df_raw['Files'].sum()))
+        # 1. התראת "שכחנו מישהו" (Missing Companies)
+        st.subheader("🚨 Missing This Month")
+        # בדיקה מול האקסל האחרון שהועלה (אם קיים בסשן)
+        if 'last_excel_list' in st.session_state:
+            current_month = datetime.now().month
+            sent_this_month = df_raw[df_raw['Date'].dt.month == current_month]['Company'].unique()
+            missing = [c for c in st.session_state.last_excel_list if c not in sent_this_month]
+            if missing:
+                st.error(f"The following companies haven't received an email this month: {', '.join(missing)}")
+            else:
+                st.success("Great! Everyone in your list received their emails this month.")
+        else:
+            st.info("Upload a Mailing List in the Sender page to track missing companies.")
 
+        # 2. חיפוש חופשי וציר זמן (Timeline Search)
         st.write("---")
+        st.subheader("🔍 Free Search & Timeline")
+        search_term = st.text_input("Search by Company Name", placeholder="Type company name...")
         
-        # טבלת פיבוט - סיכום לפי חברה
-        st.subheader("🏢 Pivot Analysis by Company")
+        if search_term:
+            search_results = df_raw[df_raw['Company'].str.contains(search_term, case=False)]
+            if not search_results.empty:
+                st.write(f"Found {len(search_results)} records for '{search_term}':")
+                # הצגת ציר זמן פשוט
+                display_search = search_results.copy()
+                display_search['Date'] = display_search['Date'].dt.strftime("%d-%m-%Y")
+                st.table(display_search[['Date', 'Recipients', 'Files']])
+            else:
+                st.warning("No records found for this company.")
+
+        # 3. ניתוח פיבוט (Pivot Table)
+        st.write("---")
+        st.subheader("🏢 Company Pivot Analysis")
         pivot = df_raw.groupby('Company').agg({
             'Recipients': 'sum',
             'Files': 'sum',
@@ -176,10 +188,5 @@ elif page == "Analytics Dashboard":
         pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
 
-        # גרף שליחות חודשי
-        st.subheader("📅 Activity Over Time")
-        df_raw['Month'] = df_raw['Date'].dt.strftime('%Y-%m')
-        monthly_chart = df_raw.groupby('Month').sum(numeric_only=True).reset_index()
-        st.line_chart(monthly_chart.set_index('Month')['Recipients'])
     else:
-        st.info("No data recorded yet. Send your first batch to see analytics!")
+        st.info("No data recorded yet.")
