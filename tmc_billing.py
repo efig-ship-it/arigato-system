@@ -36,7 +36,7 @@ def get_history():
 
 init_db()
 
-# עיצוב CSS לצמצום רווחים מקסימלי
+# עיצוב CSS לצמצום רווחים ומרכוז
 st.markdown("""
     <style>
     .block-container { padding-top: 2rem; padding-bottom: 0rem; }
@@ -44,8 +44,19 @@ st.markdown("""
     .stVerticalBlock { gap: 0.4rem; }
     hr { margin: 0.5em 0px; }
     .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
-    /* עיצוב ייעודי לכותרת ה-Due Date */
-    .due-date-label { font-size: 14px; margin-bottom: 5px; font-weight: 500; color: #31333F; }
+    
+    /* מרכוז כותרת ה-Due Date */
+    .due-date-container {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-bottom: 2px;
+    }
+    .due-date-label {
+        font-size: 14px;
+        font-weight: 500;
+        color: #31333F;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -57,8 +68,8 @@ c1, c2 = st.columns([2, 1])
 with c1:
     up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
 with c2:
-    # הוספת כותרת Due Date מעל הבחירה
-    st.markdown('<p class="due-date-label">Due Date</p>', unsafe_allow_html=True)
+    # יצירת כותרת ממרכזת
+    st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
     mc, yc = st.columns(2)
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1, label_visibility="collapsed")
