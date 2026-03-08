@@ -6,10 +6,31 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף
+# הגדרות דף וצמצום רווחים דרך CSS
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
-st.title("🏨 TMC Billing System")
+st.markdown("""
+    <style>
+    /* צמצום רווחים כללי בין אלמנטים */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+    }
+    .stVerticalBlock {
+        gap: 0.5rem;
+    }
+    hr {
+        margin: 0.5em 0px;
+    }
+    /* הסרת רווחים מיותרים בכותרות */
+    h1, h2, h3 {
+        margin-bottom: -0.5rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# כותרת ללא סמל המלון
+st.title("TMC Billing System")
 
 # פונקציה להשמעת צלילים
 def play_sound(sound_type):
@@ -17,7 +38,7 @@ def play_sound(sound_type):
     audio_html = f'<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>'
     st.components.v1.html(audio_html, height=0)
 
-# --- חלק 1: הגדרות וקבצים (קומפקטי) ---
+# --- חלק 1: הגדרות וקבצים ---
 st.subheader("1. Setup & Files")
 c1, c2 = st.columns([2, 1])
 
@@ -36,7 +57,7 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח (קומפקטי בעמודות) ---
+# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2 = st.columns(2)
@@ -48,7 +69,7 @@ user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {curren
 with st.expander("🔑 How to create an App Password?"):
     st.markdown("1. Go to Google Security. 2. 2-Step Verification ON. 3. Create 'App password'.")
 
-# --- לוגיקה וכפתור הפעלה ---
+# --- לוגיקה ---
 def get_files_for_company(company_name, files_list):
     search_name = str(company_name).strip().lower()
     return [f for f in files_list if search_name in f.name.lower()]
@@ -90,11 +111,11 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
             
             server.quit()
             if sent_count > 0:
-                st.success(f"Sent {sent_count} emails!")
+                st.success(f"Successfully sent {sent_count} emails!")
                 play_sound("success")
                 st.balloons()
             else:
-                st.error("No matches found.")
+                st.error("0 emails were sent. No matches found.")
                 play_sound("error")
         except Exception as e:
             st.error(f"Error: {e}")
