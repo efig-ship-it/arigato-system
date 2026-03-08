@@ -16,7 +16,7 @@ st.header("1. Upload Files")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("**1. Upload Mailing List**")
+    st.markdown("**1. Upload Mailing List (Excel)**")
     up_ex = st.file_uploader("Upload Excel List", type=['xlsx'], label_visibility="collapsed")
     
 with col2:
@@ -31,7 +31,7 @@ uploaded_files = st.file_uploader("Drag and drop all files here",
                                  label_visibility="collapsed")
 
 if uploaded_files:
-    st.info(f"📂 {len(uploaded_files)} files uploaded. The system will match them to companies automatically.")
+    st.info(f"📂 {len(uploaded_files)} files uploaded. Matching logic is ready.")
 
 st.write("---")
 
@@ -61,8 +61,7 @@ st.write("---")
 def get_files_for_company(company_name, files_list):
     """מחפש קבצים שהשם שלהם מכיל את שם החברה"""
     matched_files = []
-    # מנקה רווחים והופך לאותיות קטנות להשוואה טובה יותר
-    search_name = company_name.strip().lower()
+    search_name = str(company_name).strip().lower()
     
     for uploaded_file in files_list:
         if search_name in uploaded_file.name.lower():
@@ -88,15 +87,23 @@ if st.button("Start Bulk Sending", use_container_width=True):
             total_rows = len(df)
 
             for i, row in df.iterrows():
+                # חילוץ נתונים מהשורות
                 company = str(row.iloc[0]).strip()
-                emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
-                day_val = str(row.iloc[2]).strip() if len(row.columns) > 2 else "10"
+                emails_raw = str(row.iloc[1]).split(',')
+                emails = [e.strip() for e in emails_raw if '@' in e]
+                
+                # תיקון השגיאה: בדיקת כמות העמודות מתבצעת מול ה-df
+                if len(df.columns) > 2:
+                    day_val = str(row.iloc[2]).strip()
+                else:
+                    day_val = "10"
+                
                 due_date = f"{day_val} {current_month_year}"
                 
                 # חיפוש קבצים מתוך הרשימה שהועלתה
                 company_files = get_files_for_company(company, uploaded_files)
                 
-                if company_files:
+                if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'] = user_mail
                     msg['To'] = ", ".join(emails)
@@ -107,7 +114,6 @@ if st.button("Start Bulk Sending", use_container_width=True):
                     
                     # צירוף הקבצים שנמצאו
                     for f in company_files:
-                        # קריאת תוכן הקובץ מהזיכרון
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                         msg.attach(part)
@@ -116,7 +122,10 @@ if st.button("Start Bulk Sending", use_container_width=True):
                     sent_count += 1
                     status.text(f"✅ Sent to: {company}")
                 else:
-                    st.warning(f"⚠️ No files found for {company}. Skipping...")
+                    if not emails:
+                        st.warning(f"⚠️ No valid email found for {company}. Skipping...")
+                    else:
+                        st.warning(f"⚠️ No files found for {company}. Skipping...")
 
                 prog.progress((i + 1) / total_rows)
                 time.sleep(0.1)
@@ -126,6 +135,6 @@ if st.button("Start Bulk Sending", use_container_width=True):
             st.balloons()
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error during process: {e}")
     else:
-        st.warning("Please upload the mailing list and the invoice files.")
+        st.warning("Please make sure to upload the Excel list, the invoice files, and fill in your details.")
