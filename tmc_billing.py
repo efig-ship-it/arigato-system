@@ -9,13 +9,16 @@ from datetime import datetime
 # הגדרות דף - נקי ומהודק
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
+# אתחול היסטוריית שליחה בזיכרון המערכת (session_state)
+if 'send_history' not in st.session_state:
+    st.session_state.send_history = []
+
 st.markdown("""
     <style>
     .block-container { padding-top: 3rem; padding-bottom: 0rem; }
     h1 { margin-top: 1rem !important; margin-bottom: 1rem !important; }
     .stVerticalBlock { gap: 0.6rem; }
     hr { margin: 0.6em 0px; }
-    /* יישור תיבת העזרה לגובה השדות */
     .stExpander { margin-top: 28px !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -45,11 +48,9 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח (הסבר מפורט עם קישור ליד הסיסמה) ---
+# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
-
-# חלוקה ל-3 עמודות: מייל, סיסמה, והסבר מפורט
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
 
 user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
@@ -58,14 +59,10 @@ user_pass = sc2.text_input("App Password", type="password")
 with sc3:
     with st.expander("🔑 How to create an App Password?"):
         st.markdown("""
-        To send emails via Gmail, you need a unique **App Password**.
-        *Standard login passwords will not work.*
-
         1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
         2. Make sure **2-Step Verification** is turned **ON**.
-        3. Search for **'App passwords'** in the top search bar.
-        4. Select a name (e.g., "TMC Billing") and click **Create**.
-        5. Copy the **16-character code** and paste it here.
+        3. Search for **'App passwords'**.
+        4. Copy the **16-character code** and paste it here.
         """)
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -106,8 +103,14 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                         msg.attach(part)
+                    
                     server.send_message(msg)
                     sent_count += 1
+                    
+                    # הוספה להיסטוריה בזיכרון
+                    now = datetime.now().strftime("%H:%M:%S")
+                    st.session_state.send_history.append({"Time": now, "Company": company, "Status": "✅ Sent"})
+                
                 prog.progress((i + 1) / len(df))
             
             server.quit()
@@ -121,3 +124,12 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
             play_sound("error")
+
+# --- חלק 3: היסטוריית שליחה (מוסתר בתוך תיבה נפתחת) ---
+st.write("---")
+if st.session_state.send_history:
+    with st.expander("📊 View Sending Log (Current Session)"):
+        history_df = pd.DataFrame(st.session_state.send_history)
+        st.table(history_df)
+else:
+    st.info("No emails sent in this session yet.")
