@@ -34,32 +34,37 @@ def get_history():
 
 init_db()
 
-# עיצוב CSS
+# עיצוב CSS לצמצום רווחים מקסימלי
 st.markdown("""
     <style>
-    .block-container { padding-top: 3rem; }
-    .filter-row { background-color: #f0f2f6; padding: 15px; border-radius: 10px; margin-bottom: 15px; }
+    .block-container { padding-top: 2rem; padding-bottom: 0rem; }
+    h1 { margin-top: 0rem !important; margin-bottom: 1rem !important; font-size: 2rem; }
+    h3 { margin-top: 0.5rem !important; margin-bottom: 0.5rem !important; }
+    .stVerticalBlock { gap: 0.4rem; }
+    hr { margin: 0.5em 0px; }
+    .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
+    [data-testid="stMetricValue"] { font-size: 1.5rem; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("TMC Billing System")
 
-# --- חלק 1 + 2 (הגדרות ופרטי שולח - ללא שינוי) ---
+# --- חלק 1: הגדרות וקבצים ---
 st.subheader("1. Setup & Files")
 c1, c2 = st.columns([2, 1])
 with c1:
-    up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
+    up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
 with c2:
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    curr_y = datetime.now().year
-    years = [str(y) for y in range(curr_y - 1, curr_y + 3)]
     mc, yc = st.columns(2)
-    sel_m = mc.selectbox("Month", months, index=datetime.now().month - 1)
-    sel_y = yc.selectbox("Year", years, index=1)
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1, label_visibility="collapsed")
+    years = [str(y) for y in range(datetime.now().year - 1, datetime.now().year + 3)]
+    sel_y = yc.selectbox("Yr", years, index=1, label_visibility="collapsed")
     current_month_year = f"{sel_m} {sel_y}"
 
-uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
+# --- חלק 2: פרטי שולח ---
 st.write("---")
 st.subheader("2. Sender Details")
 sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -67,14 +72,19 @@ user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
 with sc3:
     with st.expander("🔑 App Password Help"):
-        st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth ON\n3. Create 'App password'")
+        st.markdown("""
+        1. [Google Security](https://myaccount.google.com/security)
+        2. 2-Step Auth: **ON**
+        3. Search **'App passwords'**
+        4. Create & Copy the **16-char code**
+        """)
 
 user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
 # --- לוגיקה לשליחה ---
 if st.button("🚀 Start Bulk Sending", use_container_width=True):
     if not up_ex or not uploaded_files or not user_mail:
-        st.error("Missing fields!")
+        st.error("Please fill all fields and upload files.")
     else:
         try:
             df = pd.read_excel(up_ex)
@@ -92,7 +102,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 if company_files and emails:
                     msg = MIMEMultipart()
                     msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                    msg.attach(MIMEText(f"Files for {company} attached.", 'plain'))
+                    msg.attach(MIMEText(f"Attached are the invoice and report for {company}.\nDue: {current_month_year}", 'plain'))
                     for f in company_files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
                         part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -101,7 +111,6 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                     sent_count += 1
                     add_to_history(company, len(emails), len(company_files))
                 prog.progress((i + 1) / len(df))
-            
             server.quit()
             st.success(f"Sent {sent_count} emails!")
             time.sleep(1)
@@ -109,52 +118,32 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# --- חלק 3: דשבורד עם סננים בסגנון אקסל ---
+# --- חלק 3: דשבורד והיסטוריה ---
 st.write("---")
 history_df = get_history()
 
 if not history_df.empty:
-    st.subheader("📊 Sending Logs & History")
-    
-    # "שורת סננים" - כאן קורה הקסם של אקסל
-    with st.container():
-        st.write("🔍 **Excel-Style Filters:**")
+    # סיכום נתונים קומפקטי (Metrics)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Companies", len(history_df['Company'].unique()))
+    m2.metric("Total Emails", int(history_df['Recipients'].sum()))
+    m3.metric("Last Sent", history_df['Date'].iloc[0])
+
+    with st.expander("📊 View History & Filters", expanded=True):
+        # מסננים בשורה אחת קומפקטית
         f1, f2 = st.columns(2)
-        
-        # סנן חברה (כמו ה-Dropdown באקסל)
-        companies = sorted(history_df['Company'].unique())
-        selected_companies = f1.multiselect("Filter by Company", options=companies, default=[])
-        
-        # סנן תאריך
-        dates = sorted(history_df['Date'].unique(), reverse=True)
-        selected_dates = f2.multiselect("Filter by Date", options=dates, default=[])
+        sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique()))
+        sel_date = f2.multiselect("Filter Date", options=sorted(history_df['Date'].unique(), reverse=True))
 
-    # החלת הסינון על הטבלה
-    filtered_df = history_df.copy()
-    if selected_companies:
-        filtered_df = filtered_df[filtered_df['Company'].isin(selected_companies)]
-    if selected_dates:
-        filtered_df = filtered_df[filtered_df['Date'].isin(selected_dates)]
+        filtered_df = history_df.copy()
+        if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+        if sel_date: filtered_df = filtered_df[filtered_df['Date'].isin(sel_date)]
 
-    # הצגת הטבלה המסוננת
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Date": st.column_config.TextColumn("Date 📅"),
-            "Company": st.column_config.TextColumn("Company 🏢"),
-            "Recipients": st.column_config.NumberColumn("Recipients"),
-            "Files": st.column_config.NumberColumn("Files")
-        }
-    )
-    
-    # כפתור מחיקה בתחתית
-    if st.button("🗑️ Reset All History"):
-        conn = sqlite3.connect('billing_history.db')
-        conn.cursor().execute("DELETE FROM history")
-        conn.commit()
-        conn.close()
-        st.rerun()
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True,
+                    column_config={"Recipients": "Emails", "Files": "Files Attached"})
+        
+        if st.button("🗑️ Reset History"):
+            conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
+            st.rerun()
 else:
     st.info("No activity recorded yet.")
