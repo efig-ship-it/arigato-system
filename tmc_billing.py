@@ -6,36 +6,22 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime
 
-# הגדרות דף - עיצוב מהודק עם מרווח עליון תקין
+# הגדרות דף - עיצוב מהודק
 st.set_page_config(page_title="TMC Billing System", layout="centered")
 
 st.markdown("""
     <style>
-    /* מרווח עליון מאוזן שהכותרת תיראה טוב */
-    .block-container {
-        padding-top: 3rem;
-        padding-bottom: 0rem;
-    }
-    /* מרווח ספציפי מעל ומתחת לכותרת הראשית */
-    h1 {
-        margin-top: 1rem !important;
-        margin-bottom: 1rem !important;
-        padding-bottom: 5px;
-    }
-    /* צמצום מרווחים בין שאר האלמנטים */
-    .stVerticalBlock {
-        gap: 0.7rem;
-    }
-    hr {
-        margin: 0.8em 0px;
-    }
+    .block-container { padding-top: 3rem; padding-bottom: 0rem; }
+    h1 { margin-top: 1rem !important; margin-bottom: 1rem !important; }
+    .stVerticalBlock { gap: 0.6rem; }
+    hr { margin: 0.6em 0px; }
+    /* עיצוב מיוחד כדי שה-Expander יתיישר יפה ליד השדה */
+    .stExpander { border: none !important; margin-top: 28px !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# כותרת נקייה
 st.title("TMC Billing System")
 
-# פונקציה להשמעת צלילים
 def play_sound(sound_type):
     sound_url = "https://www.myinstants.com/media/sounds/clapping.mp3" if sound_type == "success" else "https://www.myinstants.com/media/sounds/sad-trombone.mp3"
     audio_html = f'<audio autoplay><source src="{sound_url}" type="audio/mp3"></audio>'
@@ -52,7 +38,6 @@ with c2:
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     curr_y = datetime.now().year
     years = [str(y) for y in range(curr_y - 1, curr_y + 3)]
-    
     mc, yc = st.columns(2)
     sel_m = mc.selectbox("Month", months, index=datetime.now().month - 1)
     sel_y = yc.selectbox("Year", years, index=1)
@@ -60,17 +45,28 @@ with c2:
 
 uploaded_files = st.file_uploader("Upload all Invoices & Reports (PDF/Excel)", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-# --- חלק 2: פרטי שולח ---
+# --- חלק 2: פרטי שולח (הסבר ליד הסיסמה) ---
 st.write("---")
 st.subheader("2. Sender Details")
-sc1, sc2 = st.columns(2)
+
+# חלוקה ל-3 עמודות: מייל, סיסמה, והסבר
+sc1, sc2, sc3 = st.columns([1.5, 1.5, 1.2])
+
 user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
 user_pass = sc2.text_input("App Password", type="password")
 
-user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
+with sc3:
+    # ה-Expander מופיע עכשיו לצד השדה
+    with st.expander("🔑 Help"):
+        st.markdown("""
+        **How to create?**
+        1. Google Security
+        2. 2-Step Auth: **ON**
+        3. App Passwords
+        4. Copy 16-char code
+        """)
 
-with st.expander("🔑 How to create an App Password?"):
-    st.markdown("1. Go to Google Security. 2. 2-Step Verification ON. 3. Create 'App password'.")
+user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
 # --- לוגיקה ---
 def get_files_for_company(company_name, files_list):
@@ -118,6 +114,7 @@ if st.button("🚀 Start Bulk Sending", use_container_width=True):
                 play_sound("success")
                 st.balloons()
             else:
+                # התיקון שביקשת קודם: אם נשלחו 0, זה לא הצלחה
                 st.error("0 emails were sent. No matches found.")
                 play_sound("error")
         except Exception as e:
