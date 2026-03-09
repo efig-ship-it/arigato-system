@@ -9,9 +9,24 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות סאונד ---
-def play_sound(url):
-    st.components.v1.html(f"""<script>var audio = new Audio("{url}"); audio.play();</script>""", height=0)
+# --- מערכת סאונד משודרגת ---
+def play_audio(url):
+    st.components.v1.html(f"""
+        <script>
+            var audio = new Audio("{url}");
+            audio.play();
+        </script>
+    """, height=0)
+
+def sound_success():
+    play_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
+
+def sound_detective():
+    play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
+
+def sound_error():
+    # צליל Waa Waa Waa (Sad Trombone)
+    play_audio("https://www.myinstants.com/media/sounds/mario-dies.mp3")
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -22,25 +37,29 @@ def init_db():
     conn.commit()
     conn.close()
 
-def get_history_from_db():
-    conn = sqlite3.connect('billing_history.db')
-    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
-    conn.close()
-    return df
-
 init_db()
 
-# תפריט ניווט בצד
+# תפריט ניווט
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
-    .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
+    .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
-    .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }
-    .detective-title { font-size: 24px; font-weight: bold; color: #d32f2f; margin-bottom: 5px; }
+    .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; }
+    
+    /* עיצוב הבלש הגדול */
+    .big-detective { font-size: 80px; text-align: center; margin-bottom: 0px; }
+    .detective-header { 
+        font-size: 40px; 
+        font-weight: 900; 
+        color: #d32f2f; 
+        text-align: center; 
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        margin-top: 0px;
+    }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -66,21 +85,21 @@ if page == "Email Sender":
         try:
             df_ex = pd.read_excel(up_ex)
             excel_comps = [str(c).strip().lower() for c in df_ex.iloc[:, 0].dropna().unique()]
-            orphans = [f.name for f in uploaded_files if not any(comp in f.name.lower() for comp in excel_comps)]
+            orphans = [f.name for f in uploaded_files if not any(c in f.name.lower() for c in excel_comps)]
             
             if orphans:
-                # כותרת בלש גדולה יותר
-                st.markdown('<p class="detective-title">🕵️‍♂️ Detective Alert!</p>', unsafe_allow_html=True)
-                st.error(f"The following files do not match any company in your list: {', '.join(orphans)}")
+                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                st.error(f"Unrecognized files: {', '.join(orphans)}")
+                sound_detective() # צליל בלש
                 
-                # הודעת אישור מעוצבת באנגלית
-                st.write("")
-                with st.container():
-                    st.info("💡 **Safety Verification Required**")
+                with st.info("🚨 Action Required"):
                     allow_sending = st.toggle("I have reviewed the alerts and confirm the data is correct", value=False)
-        except: pass
+        except Exception:
+            sound_error()
+            st.error("Error processing files.")
 
-    # 2. Sender Details (הפירוט המלא נשמר ללא שינוי)
+    # 2. Sender Details (פירוט ה-App Password המקורי)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -116,7 +135,7 @@ if page == "Email Sender":
                     if files and emails:
                         msg = MIMEMultipart()
                         msg['Subject'] = f"{user_subj} - {company}"
-                        msg.attach(MIMEText(f"Attached are files for {company}.\nDue: {current_month_year}", 'plain'))
+                        msg.attach(MIMEText(f"Files for {company}.\nDue: {current_month_year}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -130,45 +149,22 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 server.quit()
-                st.balloons(); play_sound("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
-                st.success(f"Success! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
+                st.balloons()
+                sound_success() # מחיאות כפיים
+                st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
+            except Exception as e:
+                sound_error() # צליל שגיאה
+                st.error(f"Error: {e}")
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Data Analytics Dashboard")
-    df_raw = get_history_from_db()
+    st.title("📊 Analytics Dashboard")
+    conn = sqlite3.connect('billing_history.db')
+    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
+    conn.close()
 
-    if not df_raw.empty:
-        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Companies", len(df_raw['Company'].unique()))
-        m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
-        last_date = df_raw['Date_obj'].max()
-        m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
-
+    if not df.empty:
+        st.metric("Total Emails Sent", int(df['Recipients'].sum()))
         st.write("---")
-
-        with st.expander("📂 View Activity Log & Filters", expanded=True):
-            f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
-            sel_date_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
-
-            filtered_df = df_raw.copy()
-            if sel_comp:
-                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            if len(sel_date_range) == 2:
-                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
-                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
-            
-            display_df = filtered_df.drop(columns=['Date_obj']).copy()
-            display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-
-        st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
-        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
-        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
-    else:
-        st.info("No data recorded yet.")
+        with st.expander("📂 View Activity Log", expanded=True):
+            st.dataframe(df, use_container_width=True, hide_index=True)
