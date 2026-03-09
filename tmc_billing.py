@@ -4,7 +4,7 @@ import smtplib, time, sqlite3, traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
@@ -33,19 +33,20 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
+# --- Page 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 90px; text-align: center; margin-bottom: 0px; margin-top: 20px; }
-    .detective-header { font-size: 45px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; }
-    .reverse-detective-header { font-size: 45px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; }
+    .detective-header { font-size: 45px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    .reverse-detective-header { font-size: 45px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
 
-    # 1. Setup
+    # 1. Setup & Files
     st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -81,7 +82,7 @@ if page == "Email Sender":
                     if missing: st.warning(f"Reverse Detective! Missing files for: {', '.join(missing)}")
         except: pass
 
-    # 2. Sender Details
+    # 2. Sender Details (החזרתי את הפירוט המלא המקורי)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -89,7 +90,16 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
@@ -124,7 +134,6 @@ if page == "Email Sender":
                         conn.execute("INSERT INTO history VALUES (?, ?, ?, ?)", (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files)))
                         conn.commit(); conn.close()
                         sent_count += 1
-                    
                     prog.progress((i + 1) / len(df))
                 
                 server.quit(); st.balloons(); sound_success()
@@ -139,7 +148,6 @@ elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
-        # המרה בטוחה של התאריכים לצורך הפילטר
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], dayfirst=True, errors='coerce')
         
         m1, m2, m3 = st.columns(3)
@@ -148,38 +156,25 @@ elif page == "Analytics Dashboard":
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
         
         st.write("---")
-        
-        # 1. Pivot Summary (תמיד מציג הכל או לפי הפילטר)
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
         
         st.write("---")
-        
-        # 2. Activity Log עם פילטרים (כולל לוח שנה)
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
-            
-            # פילטר לוח שנה
             sel_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
             
             filtered_df = df_raw.copy()
-            
-            # החלת פילטר חברה
-            if sel_comp:
-                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            
-            # החלת פילטר לוח שנה (רק אם נבחרו שני תאריכים)
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
             if len(sel_range) == 2:
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & 
                                           (filtered_df['Date_obj'].dt.date <= sel_range[1])]
             
-            # הצגת הטבלה ללא עמודת העזר של התאריכים
             st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
             
         if st.sidebar.button("🗑️ Reset All History"):
              conn = sqlite3.connect('billing_history.db', check_same_thread=False); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
-
     else:
         st.info("No data yet.")
