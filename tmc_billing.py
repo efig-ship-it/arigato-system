@@ -20,7 +20,11 @@ def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spong
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
-                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT)''')
+                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT)''')
+    cursor = conn.execute("PRAGMA table_info(history)")
+    columns = [column[1] for column in cursor.fetchall()]
+    if 'Currency' not in columns:
+        conn.execute("ALTER TABLE history ADD COLUMN Currency TEXT DEFAULT '$'")
     conn.commit(); conn.close()
 
 def get_history_df():
@@ -57,7 +61,6 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload Company Invoices (XLSX/PDF)", accept_multiple_files=True)
 
-    # --- Detective Logic ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -69,7 +72,7 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                confirm = st.toggle("🚨 I confirm data is correct", value=False)
+                confirm = st.toggle("🚨 I confirm all is correct", value=False)
                 allow_sending = confirm
                 if not confirm:
                     if 'sound_triggered' not in st.session_state:
@@ -101,15 +104,19 @@ if page == "Email Sender":
                     emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                     company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                     
-                    # לוגיקת סכימה פנימית מתוך קבצי האקסל של החברה
                     total_amount = 0.0
+                    detected_currency = "$" # ברירת מחדל
+                    
                     for f in company_files:
                         if f.name.endswith('.xlsx'):
-                            # קריאת הקובץ הספציפי של החברה (כמו Alice.xlsx)
                             df_temp = pd.read_excel(io.BytesIO(f.getvalue()))
                             amt_col = next((c for c in df_temp.columns if 'amount' in str(c).lower()), None)
                             if amt_col:
-                                # ניקוי וסכימה של כל השורות בעמודה
+                                sample_val = str(df_temp[amt_col].iloc[0])
+                                if '₪' in sample_val: detected_currency = '₪'
+                                elif '€' in sample_val: detected_currency = '€'
+                                elif '£' in sample_val: detected_currency = '£'
+                                
                                 df_temp[amt_col] = pd.to_numeric(df_temp[amt_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
                                 total_amount += df_temp[amt_col].sum()
 
@@ -117,7 +124,7 @@ if page == "Email Sender":
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {company} - {current_period}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Hello {company},\nAttached are your billing files.\nTotal Amount Calculated: ${total_amount:,.2f}", 'plain'))
+                        msg.attach(MIMEText(f"Hello {company},\nAttached are your billing files.\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
                         for f in company_files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -125,16 +132,20 @@ if page == "Email Sender":
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db')
-                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?,?)", 
-                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail))
+                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)", 
+                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail, detected_currency))
                         conn.commit(); conn.close()
                         sent_count += 1
                 
                 server.quit(); sound_success(); st.balloons(); st.success(f"Success! {sent_count} sent."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (Dynamic Pivots) ---
+# --- Page 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
+    st.markdown("""<style>
+    [data-testid="stMetricValue"] { font-size: 18px !important; word-break: break-all !important; white-space: normal !important; }
+    </style>""", unsafe_allow_html=True)
+    
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
@@ -151,18 +162,31 @@ elif page == "Analytics Dashboard":
         st.divider()
         m_col1, m_col2, m_col3 = st.columns(3)
         m_col1.metric("Last Sending Date", df['Date'].iloc[0])
+        
+        # כתובת מייל קטנה שנכנסת כולה
         m_col2.metric("Last Sender", df['Sender'].iloc[0])
-        m_col3.metric("Total Amount Filtered", f"${f_df['Amount'].sum():,.2f}")
+        
+        # סכום עם פסיקים ומטבע דינמי
+        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
+        m_col3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
 
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Pivot by Company**")
-            st.dataframe(f_df.groupby('Company').agg({'Amount':'sum', 'Recipients':'sum'}).reset_index(), use_container_width=True, hide_index=True)
+            # פיבוט עם פורמט פסיקים
+            comp_res = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum', 'Recipients':'sum'}).reset_index()
+            comp_res['Amount'] = comp_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(comp_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with p2:
             st.write("**Pivot by Date**")
-            st.dataframe(f_df.groupby('Date').agg({'Amount':'sum', 'Company':'count'}).reset_index(), use_container_width=True, hide_index=True)
+            date_res = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum', 'Company':'count'}).reset_index()
+            date_res['Amount'] = date_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(date_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
 
         with st.expander("📂 Full Filtered Log"):
-            st.dataframe(f_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+            # פורמט פסיקים בלוג
+            log_df = f_df.copy()
+            log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(log_df.drop(columns=['Date_obj', 'Currency']), use_container_width=True, hide_index=True)
     else: st.info("No data recorded.")
