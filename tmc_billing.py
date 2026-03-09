@@ -9,22 +9,23 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות סאונד מוזרקות (השיטה היציבה ביותר) ---
-def trigger_audio(url):
+# --- פונקציית סאונד (הזרקה ישירה ל-DOM) ---
+def play_audio(url):
+    # יצירת אלמנט אודיו שמופעל דרך JS כדי לעקוף חסימות
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play();
+            audio.play().catch(function(error) {{
+                console.log("Autoplay blocked, waiting for user interaction.");
+            }});
         </script>
     """, height=0)
 
 def play_detective_alert():
-    # צליל התראה לבלש
-    trigger_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
+    play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
 
 def play_applause_sound():
-    # מחיאות כפיים
-    trigger_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
+    play_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -47,7 +48,6 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""
         <style>
@@ -56,12 +56,20 @@ if page == "Email Sender":
         .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
         .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
         .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }
+        /* עיצוב עדין לתיבת האישור */
+        .confirmation-box {
+            background-color: #e8f0fe;
+            padding: 10px;
+            border-radius: 10px;
+            border-right: 5px solid #4285f4;
+            margin-bottom: 10px;
+        }
         </style>
         """, unsafe_allow_html=True)
 
     st.title("TMC Billing System")
 
-    # חלק 1: הגדרות וקבצים
+    # חלק 1: Setup & Files
     st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -75,9 +83,9 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", years, index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון הבלש ואישור השליחה ---
+    # --- הבלש ואישור השליחה המעוצב ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -86,14 +94,17 @@ if page == "Email Sender":
             orphaned = [f.name for f in uploaded_files if not any(comp in f.name.lower() for comp in excel_companies)]
             
             if orphaned:
-                play_detective_alert() # צליל התראה
-                st.error(f"🕵️‍♂️ **הבלש מצא בעיה:** נמצאו קבצים ללא שיוך באקסל: `{', '.join(orphaned)}`")
-                st.write("---")
-                user_confirmation = st.checkbox("האם הנתונים תקינים מבחינתך לשליחה? ✅")
-                allow_sending = user_confirmation
+                play_detective_alert()
+                st.error(f"🕵️‍♂️ **הבלש מצא קבצים ללא שיוך:** `{', '.join(orphaned)}`")
+                
+                # עיצוב האישור בתוך תיבת מידע עדינה
+                with st.container():
+                    st.info("💡 **בדיקת בטיחות:** נראה שיש קבצים שלא תואמים לאקסל.")
+                    user_confirmation = st.toggle("אני מאשר שהנתונים תקינים לשליחה ✅", value=False)
+                    allow_sending = user_confirmation
         except: pass
 
-    # חלק 2: פרטי שולח (הפירוט המקורי נשמר!)
+    # חלק 2: Sender Details (הפירוט המלא נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -151,48 +162,19 @@ if page == "Email Sender":
                 time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-    # חלק 3: היסטוריה מהירה
+    # חלק 3: היסטוריה
     st.write("---")
     history_df = get_full_history()
     if not history_df.empty:
         history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
         st.dataframe(history_df, use_container_width=True, hide_index=True)
 
-# --- עמוד 2: Analytics Dashboard (מעודכן ומתרענן) ---
+# --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
-    
-    # טעינה מחדש של הנתונים מה-DB בכל כניסה לעמוד
     df_analytics = get_full_history()
-
     if not df_analytics.empty:
         df_analytics['Date_obj'] = pd.to_datetime(df_analytics['Date'], errors='coerce')
-        
-        # סיכומים מהירים
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Emails", int(df_analytics['Recipients'].sum()))
-        c2.metric("Total Files", int(df_analytics['Files'].sum()))
-        c3.metric("Last Activity", df_analytics['Date_obj'].max().strftime("%d-%m-%Y"))
-
-        st.write("---")
-        
-        # טבלת פיבוט - סיכום לפי חברה
-        st.subheader("🏢 Company Pivot Summary")
-        pivot = df_analytics.groupby('Company').agg({
-            'Recipients': 'sum',
-            'Files': 'sum',
-            'Date_obj': 'max'
-        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date_obj': 'Last Activity'}).reset_index()
-        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%d-%m-%Y")
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
-        
-        # חיפוש חופשי
-        st.subheader("🔍 Search History")
-        search = st.text_input("Search Company Name")
-        if search:
-            res = df_analytics[df_analytics['Company'].str.contains(search, case=False)]
-            res['Date'] = res['Date_obj'].dt.strftime("%d-%m-%Y")
-            st.table(res[['Date', 'Recipients', 'Files']])
-
-    else:
-        st.info("No data recorded yet. Send some emails to see analytics!")
+        pivot = df_analytics.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
+        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
+        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
