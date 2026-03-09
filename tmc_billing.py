@@ -9,14 +9,13 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Auto-Trigger Logic) ---
+# --- Audio System ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
             audio.autoplay = true;
             audio.play().catch(function(e) {{
-                console.log("Autoplay blocked. It will play on next click.");
                 window.addEventListener('click', function() {{
                     audio.play();
                 }}, {{once: true}});
@@ -28,6 +27,7 @@ def sound_success():
     play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 
 def sound_detective(): 
+    # לינק ישיר ומהיר לכינור
     play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
 
 # --- Database ---
@@ -85,25 +85,30 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                # השמעת סאונד אוטומטית ברגע שהתנאי מתקיים
-                if 'detective_triggered' not in st.session_state:
-                    sound_detective()
-                    st.session_state.detective_triggered = True
-                
-                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                if orphans: 
-                    st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                    st.error(f"Unrecognized files: {', '.join(orphans)}")
-                if missing: 
-                    st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                    st.warning(f"Missing files for: {', '.join(missing)}")
-                
-                st.write("---")
-                confirm = st.toggle("I confirm all is correct and I am ready to send", value=False)
-                allow_sending = confirm
+                # הצגת תיבת האישור תמיד כשיש טעות
+                with st.warning("🚨 **Data Validation Required**"):
+                    confirm = st.toggle("I confirm all is correct and I am ready to send", key="validation_toggle")
+                    allow_sending = confirm
+
+                # כל האלמנטים הוויזואליים (כולל כותרות) נעלמים ב-Confirm
+                if not confirm:
+                    if 'sound_triggered' not in st.session_state:
+                        sound_detective()
+                        st.session_state.sound_triggered = True
+                    
+                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    if orphans: 
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: 
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        st.warning(f"Missing files for: {', '.join(missing)}")
+                else:
+                    if 'sound_triggered' in st.session_state:
+                        del st.session_state.sound_triggered
             else:
-                if 'detective_triggered' in st.session_state:
-                    del st.session_state.detective_triggered
+                if 'sound_triggered' in st.session_state:
+                    del st.session_state.sound_triggered
         except: pass
 
     # 2. Sender Details
@@ -116,10 +121,8 @@ if page == "Email Sender":
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
+            2. Enable **2-Step Verification**.
+            3. Search **'App passwords'** and create one.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
@@ -164,7 +167,7 @@ if page == "Email Sender":
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics ---
+# --- Page 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -180,7 +183,6 @@ elif page == "Analytics Dashboard":
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
         
-        st.write("---")
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
