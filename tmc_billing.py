@@ -9,15 +9,15 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Fixed with Direct Link) ---
+# --- Audio System (Auto-Trigger Logic) ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.preload = "auto";
+            audio.autoplay = true;
             audio.play().catch(function(e) {{
-                console.log("Autoplay blocked. Click anywhere to play.");
-                document.addEventListener('click', function() {{
+                console.log("Autoplay blocked. It will play on next click.");
+                window.addEventListener('click', function() {{
                     audio.play();
                 }}, {{once: true}});
             }});
@@ -28,7 +28,6 @@ def sound_success():
     play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 
 def sound_detective(): 
-    # הלינק הישיר לקובץ ה-MP3 מהדף ששלחת
     play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
 
 # --- Database ---
@@ -86,27 +85,28 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                if 'sound_played' not in st.session_state:
+                # השמעת סאונד אוטומטית ברגע שהתנאי מתקיים
+                if 'detective_triggered' not in st.session_state:
                     sound_detective()
-                    st.session_state.sound_played = True
+                    st.session_state.detective_triggered = True
                 
-                with st.info("🚨 **Action Required: Data Validation**"):
-                    confirm = st.toggle("I confirm that data is correct", value=False)
-                    allow_sending = confirm
+                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                if orphans: 
+                    st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                    st.error(f"Unrecognized files: {', '.join(orphans)}")
+                if missing: 
+                    st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                    st.warning(f"Missing files for: {', '.join(missing)}")
                 
-                if not confirm:
-                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: 
-                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                        st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: 
-                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing files for: {', '.join(missing)}")
+                st.write("---")
+                confirm = st.toggle("I confirm all is correct and I am ready to send", value=False)
+                allow_sending = confirm
             else:
-                st.session_state.sound_played = False
+                if 'detective_triggered' in st.session_state:
+                    del st.session_state.detective_triggered
         except: pass
 
-    # 2. Sender Details (הפירוט המלא חזר!)
+    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -115,9 +115,6 @@ if page == "Email Sender":
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            *Standard login passwords will not work.*
-
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
             2. Make sure **2-Step Verification** is turned **ON**.
             3. Search for **'App passwords'** in the top search bar.
@@ -167,7 +164,7 @@ if page == "Email Sender":
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics Dashboard (Pivot + Calendar) ---
+# --- Page 2: Analytics ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -179,9 +176,8 @@ elif page == "Analytics Dashboard":
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
         
         st.write("---")
-        # טבלת פיבוט חזרה!
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
         
         st.write("---")
