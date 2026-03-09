@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, sqlite3, base64
+import smtplib, time, sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -9,16 +9,10 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציית סאונד בשיטה הבטוחה ביותר (Base64) ---
+# --- פונקציית סאונד מחיאות כפיים ---
 def play_applause_sound():
-    # סאונד מחיאות כפיים בשיטה שעוקפת חסימות דפדפן
-    audio_placeholder = st.empty()
-    sound_url = "https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3"
-    audio_placeholder.markdown(f"""
-        <audio autoplay="true">
-            <source src="{sound_url}" type="audio/mpeg">
-        </audio>
-    """, unsafe_allow_html=True)
+    audio_url = "https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3"
+    st.components.v1.html(f"""<audio autoplay><source src="{audio_url}" type="audio/mpeg"></audio>""", height=0)
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -31,7 +25,7 @@ def init_db():
 
 init_db()
 
-# --- תפריט ניווט בצד ---
+# תפריט ניווט בצד
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
@@ -67,39 +61,17 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון התראות חכמות (כפילויות וחברות חסרות) ---
+    # התראת בלש 🕵️‍♂️
     if up_ex and uploaded_files:
         try:
             df_excel = pd.read_excel(up_ex)
             excel_companies = [str(c).strip().lower() for c in df_excel.iloc[:, 0].dropna().unique()]
-            file_names = [f.name.lower() for f in uploaded_files]
-            
-            # 1. בדיקת חברות שקיימות בקבצים אבל חסרות באקסל (הבלש🕵️‍♂️)
-            orphaned_files = []
-            for fname in file_names:
-                found = False
-                for comp in excel_companies:
-                    if comp in fname:
-                        found = True
-                        break
-                if not found:
-                    orphaned_files.append(fname)
-            
-            if orphaned_files:
-                st.error(f"🕵️‍♂️ **עצור! משהו מוזר כאן...**\nהעלית קבצים עבור: `{', '.join(orphaned_files)}`, אבל החברות האלו בכלל לא מופיעות ברשימת המיילים שלך! אולי Alice הלכה לאיבוד?")
-
-            # 2. בדיקת כפילויות (האם כבר שלחנו היום?)
-            conn = sqlite3.connect('billing_history.db')
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            already_sent_today = pd.read_sql_query(f"SELECT Company FROM history WHERE Date='{today_str}'", conn)['Company'].str.lower().tolist()
-            conn.close()
-            
-            duplicates = [c for c in excel_companies if c in already_sent_today]
-            if duplicates:
-                st.warning(f"⚠️ **זהירות, כפילות!** כבר שלחת היום מיילים ל: `{', '.join(duplicates)}`. אתה בטוח שרוצה לשלוח שוב?")
+            orphaned = [f.name for f in uploaded_files if not any(comp in f.name.lower() for comp in excel_companies)]
+            if orphaned:
+                st.error(f"🕵️‍♂️ **עצור!** מצאתי קבצים שלא משויכים לאף חברה באקסל: `{', '.join(orphaned)}`")
         except: pass
 
-    # חלק 2: פרטי שולח (הפירוט המלא נשמר)
+    # חלק 2: פרטי שולח
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -107,12 +79,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. 2-Step Verification: **ON**.
-            3. Search for **'App passwords'**.
-            4. Create & Copy the **16-character code**.
-            """)
+            st.markdown("1. Go to [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth: **ON**\n3. Search **'App passwords'**\n4. Copy the **16-char code**.")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
@@ -133,7 +100,7 @@ if page == "Email Sender":
                     if files and emails:
                         msg = MIMEMultipart()
                         msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                        msg.attach(MIMEText(f"Hi,\n\nAttached are files for {company}.\nDue: {current_month_year}", 'plain'))
+                        msg.attach(MIMEText(f"Attached are files for {company}.\nDue: {current_month_year}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -148,33 +115,59 @@ if page == "Email Sender":
                     prog.progress((i + 1) / len(df))
                 
                 server.quit()
-                st.balloons()
-                play_applause_sound() # מחיאות כפיים!
+                st.balloons(); play_applause_sound()
                 st.success(f"Success! {sent_count} emails sent.")
                 time.sleep(2); st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
-    # חלק 3: היסטוריה
+    # חלק 3: היסטוריה - תצוגה מתוקנת למניעת שגיאה
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
 
     if not history_df.empty:
-        history_df['Date'] = pd.to_datetime(history_df['Date']).dt.date
+        # פתרון השגיאה: המרה בטוחה של תאריכים
+        history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(history_df['Company'].unique()))
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-        m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d-%m-%Y"))
+        # הצגת תאריך אחרון בפורמט DD/MM/YYYY
+        last_date = history_df['Date_obj'].max()
+        m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
+
+        with st.expander("📊 View History & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique().tolist()))
+            sel_date_range = f2.date_input("Date Range", value=[])
+
+            filtered_df = history_df.copy()
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
+                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            
+            # הצגת הטבלה בפורמט DD-MM-YYYY
+            display_df = filtered_df.drop(columns=['Date_obj']).copy()
+            display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            if st.button("🗑️ Reset History"):
+                conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
+                st.rerun()
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
-    conn = sqlite3.connect('billing_history.db'); df_raw = pd.read_sql_query("SELECT * FROM history", conn); conn.close()
+    conn = sqlite3.connect('billing_history.db')
+    df_raw = pd.read_sql_query("SELECT * FROM history", conn); conn.close()
+    
     if not df_raw.empty:
-        df_raw['Date'] = pd.to_datetime(df_raw['Date'])
+        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
-        pivot['Date'] = pivot['Date'].dt.strftime("%d-%m-%Y")
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
+        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
+        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
+    else: st.info("No data yet.")
