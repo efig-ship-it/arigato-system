@@ -6,18 +6,15 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף
+# הגדרות דף - TMC Billing & Analytics
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציית סאונד (הזרקה ישירה ל-DOM) ---
+# --- פונקציות סאונד (הזרקה ישירה ל-DOM לשרידות מקסימלית) ---
 def play_audio(url):
-    # יצירת אלמנט אודיו שמופעל דרך JS כדי לעקוף חסימות
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play().catch(function(error) {{
-                console.log("Autoplay blocked, waiting for user interaction.");
-            }});
+            audio.play().catch(function(error) {{ console.log("Blocked"); }});
         </script>
     """, height=0)
 
@@ -44,10 +41,11 @@ def get_full_history():
 
 init_db()
 
-# תפריט ניווט
+# תפריט ניווט בצד
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
+# --- עמוד 1: Email Sender (העיצוב המקורי והמצוין) ---
 if page == "Email Sender":
     st.markdown("""
         <style>
@@ -56,14 +54,6 @@ if page == "Email Sender":
         .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
         .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
         .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }
-        /* עיצוב עדין לתיבת האישור */
-        .confirmation-box {
-            background-color: #e8f0fe;
-            padding: 10px;
-            border-radius: 10px;
-            border-right: 5px solid #4285f4;
-            margin-bottom: 10px;
-        }
         </style>
         """, unsafe_allow_html=True)
 
@@ -83,9 +73,9 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", years, index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- הבלש ואישור השליחה המעוצב ---
+    # --- מנגנון הבלש ואישור השליחה ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -94,17 +84,15 @@ if page == "Email Sender":
             orphaned = [f.name for f in uploaded_files if not any(comp in f.name.lower() for comp in excel_companies)]
             
             if orphaned:
-                play_detective_alert()
-                st.error(f"🕵️‍♂️ **הבלש מצא קבצים ללא שיוך:** `{', '.join(orphaned)}`")
-                
-                # עיצוב האישור בתוך תיבת מידע עדינה
-                with st.container():
-                    st.info("💡 **בדיקת בטיחות:** נראה שיש קבצים שלא תואמים לאקסל.")
-                    user_confirmation = st.toggle("אני מאשר שהנתונים תקינים לשליחה ✅", value=False)
-                    allow_sending = user_confirmation
+                st.error(f"🕵️‍♂️ **הבלש מצא בעיה:** נמצאו קבצים ללא שיוך באקסל: `{', '.join(orphaned)}`")
+                # אישור מעוצב ועדין
+                with st.info("💡 **נדרש אישור:** נמצאו אי-תאימויות בנתונים."):
+                    confirm = st.toggle("אני מאשר שהנתונים תקינים לשליחה ✅", value=False)
+                    if confirm: play_detective_alert() # הפעלה ראשונית של סאונד באישור
+                    allow_sending = confirm
         except: pass
 
-    # חלק 2: Sender Details (הפירוט המלא נשמר)
+    # חלק 2: Sender Details (הפירוט המלא נשמר מילה במילה)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -162,19 +150,34 @@ if page == "Email Sender":
                 time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-    # חלק 3: היסטוריה
+    # חלק 3: היסטוריה מהירה בדף הבית
     st.write("---")
     history_df = get_full_history()
     if not history_df.empty:
-        history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
+        history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Companies", len(history_df['Company'].unique()))
+        m2.metric("Total Emails", int(history_df['Recipients'].sum()))
+        m3.metric("Last Sent", history_df['Date_obj'].max().strftime("%d-%m-%Y") if pd.notnull(history_df['Date_obj'].max()) else "N/A")
+        
+        display_df = history_df.drop(columns=['Date_obj']).copy()
+        display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-# --- עמוד 2: Analytics Dashboard ---
+# --- עמוד 2: Analytics Dashboard (הפיבוט המקורי והחזק) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_analytics = get_full_history()
     if not df_analytics.empty:
         df_analytics['Date_obj'] = pd.to_datetime(df_analytics['Date'], errors='coerce')
-        pivot = df_analytics.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
-        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
-        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
+        
+        st.subheader("🏢 Company Pivot Summary")
+        pivot = df_analytics.groupby('Company').agg({
+            'Recipients': 'sum', 
+            'Files': 'sum', 
+            'Date_obj': 'max'
+        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date_obj': 'Last Activity'}).reset_index()
+        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%d-%m-%Y")
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
+    else:
+        st.info("No data recorded yet.")
