@@ -7,27 +7,20 @@ from email.mime.application import MIMEApplication
 from datetime import datetime
 
 # --- Page Config ---
-st.set_page_config(page_title="TMC Billing & Analytics Pro", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="TMC Billing Tracker", layout="wide")
 
 # --- Audio System ---
 def play_audio(url):
-    st.components.v1.html(f"""
-        <script>
-            var audio = new Audio("{url}");
-            audio.play().catch(e => console.log("Audio blocked"));
-        </script>
-    """, height=0)
+    st.components.v1.html(f"<script>new Audio('{url}').play();</script>", height=0)
 
 def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
-# --- Database Management (Auto-Repairing) ---
+# --- Database Management ---
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-    # יצירת טבלה בסיסית
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
-                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)''')
-    # בדיקה והוספת עמודת Amount אם חסרה (מונע את ה-KeyError שקיבלת)
+                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL)''')
     cursor = conn.execute("PRAGMA table_info(history)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'Amount' not in columns:
@@ -42,12 +35,11 @@ def get_history_df():
 init_db()
 
 # --- Sidebar ---
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1063/1063302.png", width=100)
-st.sidebar.title("TMC Control Panel")
-page = st.sidebar.radio("Navigation", ["📧 Email Dispatcher", "📊 Business Dashboard"])
+st.sidebar.title("TMC Billing")
+page = st.sidebar.radio("Navigation", ["📧 Send Invoices", "📊 Billing Dashboard"])
 
-# --- Page 1: Email Dispatcher ---
-if page == "📧 Email Dispatcher":
+# --- Page 1: Email Sender ---
+if page == "📧 Send Invoices":
     st.markdown("""<style>
     .big-detective { font-size: 400px; text-align: center; margin-top: -50px; }
     .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; }
@@ -59,7 +51,6 @@ if page == "📧 Email Dispatcher":
     with col_a:
         up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
     with col_b:
-        st.write("**Due Date Selection**")
         mo_col, yr_col = st.columns(2)
         sel_m = mo_col.selectbox("Month", ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], index=datetime.now().month-1)
         sel_y = yr_col.selectbox("Year", [2025, 2026, 2027], index=1)
@@ -82,102 +73,83 @@ if page == "📧 Email Dispatcher":
                 if 'snd' not in st.session_state:
                     sound_detective(); st.session_state.snd = True
                 st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                st.markdown(f'<p class="detective-header">MISSING DATA!</p>', unsafe_allow_html=True)
-                if orphans: st.error(f"Unknown Files: {', '.join(orphans)}")
-                if missing: st.warning(f"Missing Files for: {', '.join(missing)}")
+                st.markdown('<p class="detective-header">DATA MISMATCH!</p>', unsafe_allow_html=True)
         else:
             if 'snd' in st.session_state: del st.session_state.snd
 
     st.divider()
-    
-    # Sender Details Section
     c1, c2, c3 = st.columns([1,1,1.5])
     u_mail = c1.text_input("Gmail Address")
     u_pass = c2.text_input("App Password", type="password")
     with c3:
-        with st.expander("🔑 Setup Guide (App Password)"):
-            st.write("1. Go to [Google Security](https://myaccount.google.com/security)")
-            st.write("2. Enable 2-Step Verification.")
-            st.write("3. Create 'App Password' and paste here.")
+        with st.expander("🔑 How to create an App Password?"):
+            st.markdown("""
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
-    u_subj = st.text_input("Email Subject", value=f"Invoice Payment - {period}")
-
-    if st.button("🚀 EXECUTE BULK SENDING", use_container_width=True, disabled=not allow_sending):
-        if up_ex and uploaded_files and u_mail:
-            try:
-                df = pd.read_excel(up_ex).dropna(how='all')
-                prog = st.progress(0)
-                server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
-                server.login(u_mail.strip(), u_pass.strip().replace(" ", ""))
+    if st.button("🚀 START SENDING", use_container_width=True, disabled=not allow_sending):
+        try:
+            df = pd.read_excel(up_ex).dropna(how='all')
+            server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
+            server.login(u_mail.strip(), u_pass.strip().replace(" ", ""))
+            
+            for i, row in df.iterrows():
+                comp = str(row.iloc[0]).strip()
+                emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
+                files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
+                amt = float(re.sub(r'[^\d.]', '', str(row.get('Amount', 0))))
                 
-                sent_count = 0
-                for i, row in df.iterrows():
-                    comp = str(row.iloc[0]).strip()
-                    emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
-                    files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
+                if emails and files:
+                    msg = MIMEMultipart()
+                    msg['Subject'] = f"Invoice - {comp} - {period}"
+                    msg['To'] = ", ".join(emails)
+                    msg.attach(MIMEText(f"Hello,\nAttached is the billing for {comp}.\nAmount: ${amt:,.2f}", 'plain'))
+                    for f in files:
+                        part = MIMEApplication(f.getvalue(), Name=f.name)
+                        part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+                        msg.attach(part)
+                    server.send_message(msg)
                     
-                    # ניקוי סכום מתווים לא רצויים
-                    amt_raw = str(row.get('Amount', 0))
-                    amt = float(re.sub(r'[^\d.]', '', amt_raw)) if amt_raw else 0.0
-                    
-                    if emails and files:
-                        msg = MIMEMultipart()
-                        msg['Subject'] = f"{u_subj} - {comp}"
-                        msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Attached are the billing files for {comp}.\nTotal Amount: ${amt:,.2f}", 'plain'))
-                        
-                        for f in files:
-                            part = MIMEApplication(f.getvalue(), Name=f.name)
-                            part['Content-Disposition'] = f'attachment; filename="{f.name}"'
-                            msg.attach(part)
-                        
-                        server.send_message(msg)
-                        conn = sqlite3.connect('billing_history.db')
-                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?)", 
-                                     (datetime.now().strftime("%d/%m/%Y"), comp, len(emails), len(files), amt))
-                        conn.commit(); conn.close()
-                        sent_count += 1
-                    prog.progress((i + 1) / len(df))
-                
-                server.quit(); sound_success(); st.balloons()
-                st.success(f"Successfully sent {sent_count} emails!"); time.sleep(3); st.rerun()
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
+                    conn = sqlite3.connect('billing_history.db')
+                    conn.execute("INSERT INTO history VALUES (?,?,?,?,?)", 
+                                 (datetime.now().strftime("%d/%m/%Y"), comp, len(emails), len(files), amt))
+                    conn.commit(); conn.close()
+            
+            server.quit(); sound_success(); st.balloons(); st.success("Done!"); time.sleep(2); st.rerun()
+        except Exception as e: st.error(f"Error: {e}")
 
 # --- Page 2: Dashboard ---
-elif page == "📊 Business Dashboard":
-    st.title("📊 Business & Financial Analytics")
+elif page == "📊 Billing Dashboard":
+    st.title("📊 Client Billing Overview")
     df = get_history_df()
     
     if not df.empty:
-        # Metrics Cards
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Revenue", f"${df['Amount'].sum():,.2f}")
-        m2.metric("Total Invoices", len(df))
-        m3.metric("Total Recipients", int(df['Recipients'].sum()))
-        m4.metric("Avg. Invoice", f"${df['Amount'].mean():,.2f}")
+        # יצירת עמודת חודש-שנה לצורך המטריצה
+        df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True)
+        df['Month'] = df['Date_obj'].dt.strftime('%b %Y')
+
+        st.subheader("💰 Monthly Billing per Client")
+        # יצירת מטריצה: שורות = חברה, עמודות = חודש, ערכים = סכום
+        billing_matrix = df.pivot_table(
+            index='Company', 
+            columns='Month', 
+            values='Amount', 
+            aggfunc='sum', 
+            fill_value=0
+        )
+        
+        # הצגת המטריצה עם עיצוב כספי
+        st.dataframe(billing_matrix.style.format("${:,.2f}"), use_container_width=True)
 
         st.divider()
+        st.subheader("📂 Full History Log")
+        st.dataframe(df.drop(columns=['Date_obj', 'Month']), use_container_width=True, hide_index=True)
         
-        # PIVOT TABLES
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("🏢 Revenue by Company")
-            comp_pivot = df.groupby('Company').agg({'Amount':'sum', 'Files':'sum'}).reset_index()
-            st.dataframe(comp_pivot.sort_values('Amount', ascending=False), use_container_width=True, hide_index=True)
-        
-        with col2:
-            st.subheader("📅 Revenue by Date")
-            date_pivot = df.groupby('Date').agg({'Amount':'sum', 'Company':'count'}).rename(columns={'Company':'Invoices'}).reset_index()
-            st.dataframe(date_pivot, use_container_width=True, hide_index=True)
-
-        st.divider()
-        
-        # LOGS
-        with st.expander("🔍 Detailed Transaction Log"):
-            st.dataframe(df, use_container_width=True, hide_index=True)
-
-        if st.sidebar.button("🗑️ Clear Database"):
+        if st.sidebar.button("🗑️ Clear All Data"):
             conn = sqlite3.connect('billing_history.db'); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
     else:
-        st.info("No data available yet. Start by sending invoices!")
+        st.info("No billing data yet.")
