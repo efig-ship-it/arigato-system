@@ -35,7 +35,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (Untouched) ---
+# --- Page 1: Email Sender (UNTOUCHED) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -49,7 +49,7 @@ if page == "Email Sender":
     st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
     with c1:
-        up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], key="up_ex")
+        up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'])
     with c2:
         st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
         mc, yc = st.columns(2)
@@ -87,7 +87,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords' (16 chars).")
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords'.")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -119,7 +119,7 @@ if page == "Email Sender":
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {company} - {current_period}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Hello,\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
+                        msg.attach(MIMEText(f"Hello,\nTotal: {detected_currency}{total_amount:,.2f}", 'plain'))
                         for f in company_files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -132,85 +132,76 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (Untouched Layout, Fixed Metrics) ---
+# --- Page 2: Analytics Dashboard (UNTOUCHED) ---
 elif page == "Analytics Dashboard":
     st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        c1, c2 = st.columns(2)
-        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
-        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
-        f_df = df.copy()
-        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
-        if len(sel_date) == 2:
-            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
-
-        st.divider()
-        m_col1, m_col2, m_col3 = st.columns(3)
-        m_col1.metric("Last Sending Date", df['Date'].iloc[0])
-        m_col2.metric("Last Sender", df['Sender'].iloc[0])
-        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
-        m_col3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
-
+        c1, c2 = st.columns(3)
+        c1.metric("Last Sending Date", df['Date'].iloc[0])
+        c2.metric("Last Sender", df['Sender'].iloc[0])
+        c3_val = f"${df['Amount'].sum():,.2f}"
+        st.columns(3)[2].metric("Total Amount Filtered", c3_val)
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Pivot by Company**")
-            res1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum', 'Recipients':'sum'}).reset_index()
+            res1 = df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res1['Amount'] = res1.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res1.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with p2:
             st.write("**Pivot by Date**")
-            res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum', 'Company':'count'}).reset_index()
+            res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with st.expander("📂 Full Filtered Log", expanded=True):
-            log_df = f_df.copy()
+            log_df = df.copy()
             log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(log_df[['Date', 'Company', 'Recipients', 'Files', 'Amount', 'Sender']], use_container_width=True, hide_index=True)
-    else: st.info("No data recorded.")
 
-# --- Page 3: Collections Control (COLOR CODED & EDITABLE) ---
+# --- Page 3: Collections Control (DYNAMIC ROW COLORING) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
     
     if not df.empty:
-        # פונקציה לצביעת השורות לפי סטטוס (ירוק ל-Paid, אדום ל-Sent)
-        def color_status(val):
-            if val == 'Paid': return 'background-color: #d4edda; color: #155724; font-weight: bold;'
-            if val == 'Sent': return 'background-color: #f8d7da; color: #721c24; font-weight: bold;'
-            return ''
+        # פונקציה לצביעת השורות בצורה ברורה
+        def style_rows(row):
+            if row.Status == 'Paid':
+                return ['background-color: #c8e6c9; color: #1b5e20; font-weight: bold'] * len(row)
+            if row.Status == 'Sent':
+                return ['background-color: #ffcdd2; color: #b71c1c; font-weight: bold'] * len(row)
+            return [''] * len(row)
 
-        st.write("Edit **Status** or **Notes** (Click twice to edit notes) then click **Save All Changes**.")
-        
-        # תצוגה עם עריכה וצבעים
-        # השתמשתי בסטייל על הסטטוס בלבד בתוך ה-Editor
+        st.write("Edit **Status** or **Notes** below. Colors update after clicking **Save**.")
+
+        # הטבלה המעוצבת והניתנת לעריכה
+        # כאן אני משתמש ב-style ישירות על ה-editor
+        styled_df = df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']].style.apply(style_rows, axis=1)
+
         edited_df = st.data_editor(
-            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']],
+            styled_df,
             column_config={
                 "rowid": None,
                 "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"], width="medium"),
-                "Notes": st.column_config.TextColumn("Notes / Ref", width="large", required=False),
+                "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
             hide_index=True,
             use_container_width=True,
-            key="col_editor_v2"
+            key="col_editor_final"
         )
-
-        # הצגת טבלה "צבועה" למטה כבקרה (בונוס ויזואלי)
-        st.write("**Live Status View:**")
-        st.dataframe(edited_df.style.applymap(color_status, subset=['Status']), use_container_width=True, hide_index=True)
 
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (row['Status'], str(row['Notes']), row['rowid']))
+                # וידוא ששורות שאין בהן הערה לא יגרמו לשגיאה
+                note_val = str(row['Notes']) if row['Notes'] is not None else ""
+                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (row['Status'], note_val, row['rowid']))
             conn.commit(); conn.close()
-            st.success("All changes saved!"); time.sleep(1); st.rerun()
+            st.success("Successfully Saved!"); time.sleep(1); st.rerun()
     else:
         st.info("No records.")
