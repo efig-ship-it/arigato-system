@@ -6,10 +6,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף - TMC Billing & Analytics
+# הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- מערכת סאונד עם הבחירות שלך ---
+# --- מערכת סאונד ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
@@ -18,13 +18,8 @@ def play_audio(url):
         </script>
     """, height=0)
 
-def sound_success():
-    # Trumpet Success
-    play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
-
-def sound_detective():
-    # Spongebob Sad Song (כינור עצוב - טא טא טאאאא)
-    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
+def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
+def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -45,7 +40,6 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
@@ -71,9 +65,9 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", [str(y) for y in range(2025, 2030)], index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- הבלשים המשודרגים ---
+    # --- מנגנון הבלשים עם העלמת הודעה לאחר אישור ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -85,25 +79,32 @@ if page == "Email Sender":
             missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
             if orphans or missing_files:
-                sound_detective() # השמעת השיר העצוב
+                # יצירת מפתח ב-Session State כדי לעקוב אם השמענו כבר את הצליל
+                if 'sound_played' not in st.session_state:
+                    sound_detective()
+                    st.session_state.sound_played = True
                 
-                if orphans:
-                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                    st.error(f"Unrecognized files (no company in Excel): {', '.join(orphans)}")
+                # תיבת האישור מופיעה תמיד כשיש תקלה
+                with st.info("🚨 **Data Validation Required**"):
+                    confirm_toggle = st.toggle("I confirm that data is correct and I want to proceed", value=False)
+                    allow_sending = confirm_toggle
 
-                if missing_files:
-                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                    for comp in missing_files:
-                        st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
+                # ההודעות מוצגות רק אם המשתמש *לא* אישר עדיין
+                if not confirm_toggle:
+                    if orphans:
+                        st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing_files:
+                        if not orphans: st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        for comp in missing_files:
+                            st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
+            else:
+                st.session_state.sound_played = False # איפוס למקרה שהכל תקין
+        except: pass
 
-                with st.info("🚨 **Safety Verification Required**"):
-                    allow_sending = st.toggle("I confirm that data is correct and I want to proceed", value=False)
-        except Exception as e:
-            st.error(f"Validation Error: {e}")
-
-    # 2. Sender Details (הפירוט המלא נשמר)
+    # 2. Sender Details (החזרתי את הפירוט המלא)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -112,10 +113,14 @@ if page == "Email Sender":
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
             2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'**.
-            4. Copy the **16-character code**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -149,19 +154,14 @@ if page == "Email Sender":
                     prog.progress((i + 1) / len(df))
                 server.quit(); st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e:
-                st.error(f"Sending failed: {e}")
-        else:
-            st.error("Please fill in all details and upload files.")
+            except Exception as e: st.error(f"Error: {e}")
 
-# --- עמוד 2: Analytics Dashboard (תיקון ה-ValueError) ---
+# --- עמוד 2: Analytics Dashboard (החזרתי פיבוטים ופילטרים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
-        # פתרון ValueError: המרה בטוחה של תאריכים
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
@@ -169,10 +169,15 @@ elif page == "Analytics Dashboard":
 
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
-        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%Y-%m-%d")
+        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%Y-%m-%d")
         st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
 
-        with st.expander("📂 Detailed Log & Filters", expanded=True):
-            st.dataframe(df_raw.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-    else:
-        st.info("No history found.")
+        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            sel_date_range = f2.date_input("Filter by Date Range", value=[])
+            filtered_df = df_raw.copy()
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
