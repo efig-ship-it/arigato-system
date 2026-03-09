@@ -35,7 +35,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (The Detective & App Password) ---
+# --- Page 1: Email Sender (הבלש וההסברים המלאים) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -143,83 +143,86 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (FIXED SHAGIA) ---
+# --- Page 2: Analytics Dashboard (הפיבוטים המקוריים) ---
 elif page == "Analytics Dashboard":
-    st.markdown("<style>[data-testid='stMetricValue'] { font-size: 18px !important; word-break: break-all !important; white-space: normal !important; }</style>", unsafe_allow_html=True)
+    st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        c1, c2 = st.columns(2)
-        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
-        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
-        
-        f_df = df.copy()
-        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
-        if len(sel_date) == 2:
-            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
-
-        st.divider()
-        m1, m2, m3 = st.columns(3) # כאן היה התיקון ל-ValueError
-        m1.metric("Last Date", df['Date'].iloc[0])
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Last Sending Date", df['Date'].iloc[0])
         m2.metric("Last Sender", df['Sender'].iloc[0])
-        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
-        m3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
-
+        m3.metric("Total Overall Amount", f"${df['Amount'].sum():,.2f}")
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Pivot by Company**")
-            res1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res1 = df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res1['Amount'] = res1.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res1.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with p2:
             st.write("**Pivot by Date**")
-            res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        
         with st.expander("📂 Full Filtered Log", expanded=True):
-            log_df = f_df.copy()
+            log_df = df.copy()
             log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(log_df[['Date', 'Company', 'Recipients', 'Files', 'Amount', 'Sender']], use_container_width=True, hide_index=True)
-    else: st.info("No data.")
+    else: st.info("No data recorded.")
 
-# --- Page 3: Collections Control (COLOR CODED) ---
+# --- Page 3: Collections Control (צבע ממוקד בסטטוס + לוגיקת חריגה) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
+    
     if not df.empty:
-        # פונקציית צביעת שורות
-        def style_rows(row):
-            if row.Status == 'Paid': return ['background-color: #c8e6c9; color: #1b5e20; font-weight: bold'] * len(row)
-            if row.Status == 'Sent': return ['background-color: #ffcdd2; color: #b71c1c; font-weight: bold'] * len(row)
-            return [''] * len(row)
-
-        st.write("Edit **Status** or **Notes** (Click twice to edit). Colors update after **Save**.")
+        today = date.today()
         
-        # הטבלה המעוצבת והניתנת לעריכה
-        styled_df = df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']].style.apply(style_rows, axis=1)
+        # לוגיקה לעדכון סטטוס "Overdue" אוטומטי לתצוגה
+        def check_status(row):
+            due = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
+            if row['Status'] != 'Paid' and due and today > due:
+                return 'Overdue'
+            return row['Status']
 
+        df['Display_Status'] = df.apply(check_status, axis=1)
+
+        # פונקציית צביעה ממוקדת רק לעמודת הסטטוס
+        def color_status_only(val):
+            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;' # ירוק ברור
+            if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;' # אדום ברור
+            return '' # Sent נשאר ללא צבע
+
+        st.write("בצע שינויים ב-Status או ב-Notes ולחץ על **Save**.")
+
+        # הצגת הטבלה לעריכה
+        # הערה: data_editor מציג את הצבעים רק אחרי השמירה או בטבלה סטטית
         edited_df = st.data_editor(
-            styled_df,
+            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']],
             column_config={
                 "rowid": None,
-                "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"], width="medium"),
+                "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"], width="medium"),
                 "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
             hide_index=True,
             use_container_width=True,
-            key="col_editor_final"
+            key="col_editor_v3"
         )
+
+        # תצוגה צבעונית מתחת לעריכה (כפי שביקשת - רק הסטטוס צבוע)
+        st.write("**Visual Status Tracker:**")
+        st.dataframe(edited_df.style.applymap(color_status_only, subset=['Display_Status']), use_container_width=True, hide_index=True)
 
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                note_val = str(row['Notes']) if row['Notes'] is not None else ""
-                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (row['Status'], note_val, row['rowid']))
+                # אם המשתמש בחר Overdue ידנית, זה יישמר כ-Sent כדי שהלוגיקה תמשיך לבדוק אותו
+                final_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
+                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (final_status, str(row['Notes']), row['rowid']))
             conn.commit(); conn.close()
-            st.success("Successfully Saved!"); time.sleep(1); st.rerun()
+            st.success("Saved!"); time.sleep(1); st.rerun()
     else: st.info("No records.")
