@@ -35,8 +35,8 @@ def get_history_df():
 init_db()
 
 # --- Sidebar ---
-st.sidebar.title("TMC Billing")
-page = st.sidebar.radio("Navigation", ["📧 Send Invoices", "📊 Billing Dashboard"])
+st.sidebar.title("TMC Billing Control")
+page = st.sidebar.radio("Navigation", ["📧 Send Invoices", "📊 Client Billing Matrix"])
 
 # --- Page 1: Email Sender ---
 if page == "📧 Send Invoices":
@@ -101,7 +101,8 @@ if page == "📧 Send Invoices":
                 comp = str(row.iloc[0]).strip()
                 emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                 files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
-                amt = float(re.sub(r'[^\d.]', '', str(row.get('Amount', 0))))
+                amt_str = str(row.get('Amount', 0))
+                amt = float(re.sub(r'[^\d.]', '', amt_str)) if any(c.isdigit() for c in amt_str) else 0.0
                 
                 if emails and files:
                     msg = MIMEMultipart()
@@ -119,37 +120,43 @@ if page == "📧 Send Invoices":
                                  (datetime.now().strftime("%d/%m/%Y"), comp, len(emails), len(files), amt))
                     conn.commit(); conn.close()
             
-            server.quit(); sound_success(); st.balloons(); st.success("Done!"); time.sleep(2); st.rerun()
+            server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
 # --- Page 2: Dashboard ---
-elif page == "📊 Billing Dashboard":
-    st.title("📊 Client Billing Overview")
+elif page == "📊 Client Billing Matrix":
+    st.title("📊 Client Billing Matrix")
     df = get_history_df()
     
     if not df.empty:
-        # יצירת עמודת חודש-שנה לצורך המטריצה
-        df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True)
-        df['Month'] = df['Date_obj'].dt.strftime('%b %Y')
-
-        st.subheader("💰 Monthly Billing per Client")
-        # יצירת מטריצה: שורות = חברה, עמודות = חודש, ערכים = סכום
-        billing_matrix = df.pivot_table(
-            index='Company', 
-            columns='Month', 
-            values='Amount', 
-            aggfunc='sum', 
-            fill_value=0
-        )
+        # תיקון השגיאה: המרת תאריכים בצורה בטוחה
+        df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
         
-        # הצגת המטריצה עם עיצוב כספי
-        st.dataframe(billing_matrix.style.format("${:,.2f}"), use_container_width=True)
-
-        st.divider()
-        st.subheader("📂 Full History Log")
-        st.dataframe(df.drop(columns=['Date_obj', 'Month']), use_container_width=True, hide_index=True)
+        # ניקוי שורות שלא הצליחו לעבור המרה
+        df = df.dropna(subset=['Date_obj'])
         
-        if st.sidebar.button("🗑️ Clear All Data"):
+        if not df.empty:
+            df['Month'] = df['Date_obj'].dt.strftime('%b %Y')
+
+            st.subheader("💰 Total Monthly Billing per Client")
+            # מטריצה של לקוח מול חודש
+            billing_matrix = df.pivot_table(
+                index='Company', 
+                columns='Month', 
+                values='Amount', 
+                aggfunc='sum', 
+                fill_value=0
+            )
+            
+            st.dataframe(billing_matrix.style.format("${:,.2f}"), use_container_width=True)
+
+            st.divider()
+            st.subheader("📂 Detailed History")
+            st.dataframe(df.drop(columns=['Date_obj', 'Month']), use_container_width=True, hide_index=True)
+        else:
+            st.warning("No valid dates found in history.")
+        
+        if st.sidebar.button("🗑️ Reset History"):
             conn = sqlite3.connect('billing_history.db'); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
     else:
-        st.info("No billing data yet.")
+        st.info("No data yet.")
