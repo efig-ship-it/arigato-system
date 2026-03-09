@@ -9,18 +9,22 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- מערכת סאונד דרמטית ---
+# --- מערכת סאונד מעודכנת עם הקישורים שלך ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play();
+            audio.play().catch(function(error) {{ console.log("Blocked by browser"); }});
         </script>
     """, height=0)
 
-def sound_success(): play_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
-def sound_detective(): play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
-def sound_dramatic(): play_audio("https://www.myinstants.com/media/sounds/dun_dun_dun.mp3") # טא טא טאאאא
+def sound_success():
+    # Trumpet Success
+    play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
+
+def sound_detective():
+    # Spongebob Sad Song (לבלש רגיל והפוך)
+    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -69,7 +73,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון הבלשים המשופר ---
+    # --- מנגנון הבלשים ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -77,32 +81,29 @@ if page == "Email Sender":
             excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
             file_names = [f.name.lower() for f in uploaded_files]
             
-            # בלש 1: קבצים ללא חברה
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
-            
-            # בלש 2 (הפוך): חברות ללא קבצים
             missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
-            if orphans:
-                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                st.error(f"Files with no matching company in Excel: {', '.join(orphans)}")
-                sound_detective()
-
-            if missing_files:
-                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                for comp in missing_files:
-                    st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
-                sound_dramatic() # טא טא טאאאא
-
             if orphans or missing_files:
+                sound_detective() # השמעת השיר העצוב של בובספוג
+                
+                if orphans:
+                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                    st.error(f"Files with no matching company in Excel: {', '.join(orphans)}")
+
+                if missing_files:
+                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                    for comp in missing_files:
+                        st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
+
                 with st.info("🚨 **Safety Verification Required**"):
                     allow_sending = st.toggle("I confirm that data is correct and I want to proceed with sending", value=False)
         except Exception:
-            sound_dramatic(); st.error("Critical error in file validation!")
+            st.error("Critical error in file validation!")
 
-    # 2. Sender Details (נשמר במלואו)
+    # 2. Sender Details (הפירוט המלא נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -146,27 +147,33 @@ if page == "Email Sender":
                         conn.commit(); conn.close()
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
-                server.quit(); st.balloons(); sound_success()
+                server.quit(); st.balloons(); sound_success() # טרמפט הצלחה
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e: sound_dramatic(); st.error(f"Error: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
-        # תיקון ValueError - המרה בטוחה
-        df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        
+        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
-        m3.metric("Last Activity", df_raw['Date'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date'].max()) else "N/A")
+        m3.metric("Last Activity", df_raw['Date_obj'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date_obj'].max()) else "N/A")
 
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
+        pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%Y-%m-%d")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
 
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
-            st.dataframe(df_raw, use_container_width=True, hide_index=True)
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            sel_date_range = f2.date_input("Filter by Date Range", value=[])
+            filtered_df = df_raw.copy()
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
     else: st.info("No data yet.")
