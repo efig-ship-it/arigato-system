@@ -14,7 +14,7 @@ def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play();
+            audio.play().catch(function(error) {{ console.log("Audio blocked"); }});
         </script>
     """, height=0)
 
@@ -65,9 +65,9 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", [str(y) for y in range(2025, 2030)], index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Invoices", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון הבלשים עם העלמת הודעה לאחר אישור ---
+    # --- מנגנון הבלשים ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -79,18 +79,17 @@ if page == "Email Sender":
             missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
             if orphans or missing_files:
-                # יצירת מפתח ב-Session State כדי לעקוב אם השמענו כבר את הצליל
-                if 'sound_played' not in st.session_state:
+                if 'alert_played' not in st.session_state:
                     sound_detective()
-                    st.session_state.sound_played = True
+                    st.session_state.alert_played = True
                 
-                # תיבת האישור מופיעה תמיד כשיש תקלה
-                with st.info("🚨 **Data Validation Required**"):
-                    confirm_toggle = st.toggle("I confirm that data is correct and I want to proceed", value=False)
-                    allow_sending = confirm_toggle
+                # תיבת האישור תמיד מופיעה אם יש בעיה
+                with st.info("🚨 **Action Required: Data Validation**"):
+                    confirm = st.toggle("I confirm that data is correct and I want to proceed", value=False)
+                    allow_sending = confirm
 
-                # ההודעות מוצגות רק אם המשתמש *לא* אישר עדיין
-                if not confirm_toggle:
+                # ההודעות והבלש נעלמים ברגע האישור
+                if not confirm:
                     if orphans:
                         st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                         st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
@@ -99,12 +98,12 @@ if page == "Email Sender":
                         if not orphans: st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                         st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
                         for comp in missing_files:
-                            st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
+                            st.warning(f"⚠️ {comp} appears in the list, but no file was found!")
             else:
-                st.session_state.sound_played = False # איפוס למקרה שהכל תקין
+                st.session_state.alert_played = False
         except: pass
 
-    # 2. Sender Details (החזרתי את הפירוט המלא)
+    # 2. Sender Details (הפירוט המלא חזר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -156,28 +155,35 @@ if page == "Email Sender":
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- עמוד 2: Analytics Dashboard (החזרתי פיבוטים ופילטרים) ---
+# --- עמוד 2: Analytics Dashboard (תיקון הקריסה) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
-        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        # פתרון קבוע לשגיאת ה-KeyError והתאריכים
+        df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
-        m3.metric("Last Activity", df_raw['Date_obj'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date_obj'].max()) else "N/A")
+        m3.metric("Last Sent", df_raw['Date'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date'].max()) else "N/A")
 
-        st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
-        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%Y-%m-%d")
-        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
+        st.subheader("🏢 Company Summary")
+        # פיבוט פשוט ללא שינויי שמות שגורמים לשגיאות
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
 
-        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
+        with st.expander("📂 Filterable Activity Log", expanded=True):
             f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
-            sel_date_range = f2.date_input("Filter by Date Range", value=[])
-            filtered_df = df_raw.copy()
-            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            if len(sel_date_range) == 2:
-                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
-            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+            sel_comp = f1.multiselect("Filter Company", options=sorted(df_raw['Company'].unique().tolist()))
+            sel_date = f2.date_input("Date Range", value=[])
+            
+            f_df = df_raw.copy()
+            if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
+            if len(sel_date) == 2:
+                f_df = f_df[(f_df['Date'].dt.date >= sel_date[0]) & (f_df['Date'].dt.date <= sel_date[1])]
+            
+            # הצגת תאריכים כמו שהם נשמרו (YYYY-MM-DD)
+            st.dataframe(f_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No data recorded yet.")
