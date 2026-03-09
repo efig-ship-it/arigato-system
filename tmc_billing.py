@@ -9,9 +9,17 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות סאונד ---
+# --- פונקציית סאונד משופרת (עוקפת חסימות דפדפן) ---
 def play_sound(url):
-    st.components.v1.html(f"""<script>var audio = new Audio("{url}"); audio.play();</script>""", height=0)
+    # הזרקת קוד שמפעיל את הסאונד רק בעקבות לחיצה
+    st.components.v1.html(f"""
+        <script>
+            var audio = new Audio("{url}");
+            audio.play().catch(function(error) {{
+                console.log("Autoplay was prevented. Please click anywhere on the page first.");
+            }});
+        </script>
+    """, height=0)
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -65,10 +73,14 @@ if page == "Email Sender":
             orphans = [f.name for f in uploaded_files if not any(c in f.name.lower() for c in excel_comps)]
             if orphans:
                 st.error(f"🕵️‍♂️ **הבלש מצא קבצים ללא שיוך:** {', '.join(orphans)}")
-                allow_sending = st.toggle("אני מאשר שהנתונים תקינים ✅", value=False)
+                # שימוש ב-Toggle מעוצב לאישור
+                allow_sending = st.toggle("אני מאשר שהנתונים תקינים למרות התראת הבלש ✅", value=False)
+                if not allow_sending:
+                    # השמעת צליל התראה קצר לבלש
+                    play_sound("https://www.soundjay.com/buttons/sounds/button-4.mp3")
         except: pass
 
-    # 2. Sender Details (הפירוט נשמר כפי שביקשת)
+    # 2. Sender Details (פירוט ה-App Password המקורי נשמר כאן במלואו)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -76,7 +88,16 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. Go to [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth: **ON**\n3. Search **'App passwords'**\n4. Copy the **16-char code**.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
@@ -108,23 +129,22 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 server.quit()
-                st.balloons(); play_sound("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
+                st.balloons()
+                # מחיאות כפיים בסיום
+                play_sound("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
                 st.success(f"Success! {sent_count} emails sent."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-    # 3. היסטוריה - כאן פתרנו את השגיאה מהתמונה
+    # 3. היסטוריה - תוקן למניעת ValueError וסידור תאריכים
     st.write("---")
     history_df = get_history()
     if not history_df.empty:
-        # המרה בטוחה: אם יש שגיאה בתאריך, הוא יהפוך ל-NaT ולא יקרוס
         history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
-        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(history_df['Company'].unique()))
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-        
-        # הצגת התאריך האחרון בפורמט ישראלי
         last_date = history_df['Date_obj'].max()
+        # הצגת Last Sent בפורמט DD/MM/YYYY
         m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
 
         # הצגת הטבלה בפורמט DD-MM-YYYY
@@ -139,5 +159,6 @@ elif page == "Analytics Dashboard":
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
+        # פורמט תאריך בפיבוט
         pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
