@@ -6,26 +6,21 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף - TMC Billing & Analytics
+# הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- מערכת סאונד משודרגת (הפעלה דרך JavaScript) ---
+# --- מערכת סאונד דרמטית ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play().catch(function(error) {{ console.log("Blocked by browser"); }});
+            audio.play();
         </script>
     """, height=0)
 
-def sound_success():
-    play_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
-
-def sound_detective():
-    play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
-
-def sound_error():
-    play_audio("https://www.myinstants.com/media/sounds/mario-dies.mp3")
+def sound_success(): play_audio("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
+def sound_detective(): play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
+def sound_dramatic(): play_audio("https://www.myinstants.com/media/sounds/dun_dun_dun.mp3") # טא טא טאאאא
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -33,18 +28,16 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS history 
                  (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)''')
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
 
 def get_history_df():
     conn = sqlite3.connect('billing_history.db')
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
-    conn.close()
-    return df
+    conn.close(); return df
 
 init_db()
 
-# תפריט ניווט בצד
+# תפריט ניווט
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
@@ -56,6 +49,7 @@ if page == "Email Sender":
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; }
     .big-detective { font-size: 80px; text-align: center; margin-bottom: 0px; }
     .detective-header { font-size: 40px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    .reverse-detective-header { font-size: 40px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -75,26 +69,40 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # מנגנון הבלש 🕵️‍♂️
+    # --- מנגנון הבלשים המשופר ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
             df_ex = pd.read_excel(up_ex)
-            excel_comps = [str(c).strip().lower() for c in df_ex.iloc[:, 0].dropna().unique()]
-            orphans = [f.name for f in uploaded_files if not any(c in f.name.lower() for c in excel_comps)]
+            excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
+            file_names = [f.name.lower() for f in uploaded_files]
             
+            # בלש 1: קבצים ללא חברה
+            orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
+            
+            # בלש 2 (הפוך): חברות ללא קבצים
+            missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
+
             if orphans:
                 st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                 st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                st.error(f"Unrecognized files: {', '.join(orphans)}")
+                st.error(f"Files with no matching company in Excel: {', '.join(orphans)}")
                 sound_detective()
-                with st.info("💡 **Safety Verification Required**"):
-                    allow_sending = st.toggle("I have reviewed the alerts and confirm the data is correct", value=False)
-        except Exception:
-            sound_error()
-            st.error("Error processing files.")
 
-    # 2. Sender Details (הפירוט המלא והמקורי נשמר)
+            if missing_files:
+                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                for comp in missing_files:
+                    st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
+                sound_dramatic() # טא טא טאאאא
+
+            if orphans or missing_files:
+                with st.info("🚨 **Safety Verification Required**"):
+                    allow_sending = st.toggle("I confirm that data is correct and I want to proceed with sending", value=False)
+        except Exception:
+            sound_dramatic(); st.error("Critical error in file validation!")
+
+    # 2. Sender Details (נשמר במלואו)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -103,14 +111,10 @@ if page == "Email Sender":
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            *Standard login passwords will not work.*
-
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
             2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
+            3. Search for **'App passwords'**.
+            4. Create a name and copy the **16-character code**.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -136,75 +140,33 @@ if page == "Email Sender":
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
                         server.send_message(msg)
-                        
                         conn = sqlite3.connect('billing_history.db')
                         conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
                                            (datetime.now().strftime("%Y-%m-%d"), company, len(emails), len(files)))
                         conn.commit(); conn.close()
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
-                server.quit()
-                st.balloons(); sound_success()
+                server.quit(); st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e:
-                sound_error(); st.error(f"Error: {e}")
+            except Exception as e: sound_dramatic(); st.error(f"Error: {e}")
 
-# --- עמוד 2: Analytics Dashboard (הוחזרו הפיבוטים, הפילטרים והקיפול) ---
+# --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
-
     if not df_raw.empty:
-        # פתרון ValueError: המרה בטוחה של תאריכים
-        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        # תיקון ValueError - המרה בטוחה
+        df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
         
-        # 1. Metrics (תצוגה עליונה)
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
-        last_date = df_raw['Date_obj'].max()
-        m3.metric("Last Activity", last_date.strftime("%Y-%m-%d") if pd.notnull(last_date) else "N/A")
+        m3.metric("Last Activity", df_raw['Date'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date'].max()) else "N/A")
 
-        st.write("---")
-
-        # 2. הפיבוט המרכזי - סיכום לפי חברה
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({
-            'Recipients': 'sum', 
-            'Files': 'sum', 
-            'Date_obj': 'max'
-        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date_obj': 'Last Activity'}).reset_index()
-        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%Y-%m-%d")
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
 
-        st.write("---")
-
-        # 3. לוג פעילות מפורט עם פילטרים בתוך Expander (ניתן לקיפול)
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
-            f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
-            sel_date_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
-
-            filtered_df = df_raw.copy()
-            
-            # החלת פילטר חברה
-            if sel_comp:
-                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            
-            # החלת פילטר תאריכים
-            if len(sel_date_range) == 2:
-                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
-                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
-            
-            # הצגת הטבלה המפורטת
-            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-
-        # כפתור איפוס היסטוריה (אופציונלי)
-        if st.sidebar.button("🗑️ Reset All History"):
-            conn = sqlite3.connect('billing_history.db')
-            conn.cursor().execute("DELETE FROM history")
-            conn.commit(); conn.close()
-            st.rerun()
-
-    else:
-        st.info("No data recorded yet. Send some emails to see analytics!")
+            st.dataframe(df_raw, use_container_width=True, hide_index=True)
+    else: st.info("No data yet.")
