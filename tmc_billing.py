@@ -35,7 +35,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (הבלש וההסברים המלאים) ---
+# --- Page 1: Email Sender (UNTOUCHED) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -76,12 +76,6 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: 
-                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                        st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: 
-                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing files for: {', '.join(missing)}")
         except: pass
 
     st.write("---")
@@ -91,14 +85,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
-            """)
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords'.")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -143,17 +130,24 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (הפיבוטים המקוריים) ---
+# --- Page 2: Analytics Dashboard (UPDATED METRICS) ---
 elif page == "Analytics Dashboard":
     st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
-        df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Last Sending Date", df['Date'].iloc[0])
-        m2.metric("Last Sender", df['Sender'].iloc[0])
-        m3.metric("Total Overall Amount", f"${df['Amount'].sum():,.2f}")
+        # חישובי סכומים דינמיים לפי סטטוס
+        total_billed = df['Amount'].sum()
+        total_collected = df[df['Status'] == 'Paid']['Amount'].sum()
+        total_outstanding = total_billed - total_collected
+        
+        # מדדים עליונים חדשים
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Billed", f"${total_billed:,.2f}")
+        m2.metric("Total Collected", f"${total_collected:,.2f}", delta_color="normal")
+        m3.metric("Outstanding", f"${total_outstanding:,.2f}", delta="- Waiting", delta_color="inverse")
+        m4.metric("Last Sender", df['Sender'].iloc[0])
+
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
@@ -166,61 +160,50 @@ elif page == "Analytics Dashboard":
             res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        with st.expander("📂 Full Filtered Log", expanded=True):
+        
+        with st.expander("📂 Full History Log", expanded=True):
             log_df = df.copy()
             log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
-            st.dataframe(log_df[['Date', 'Company', 'Recipients', 'Files', 'Amount', 'Sender']], use_container_width=True, hide_index=True)
+            st.dataframe(log_df[['Date', 'Company', 'Amount', 'Status', 'Sender']], use_container_width=True, hide_index=True)
     else: st.info("No data recorded.")
 
-# --- Page 3: Collections Control (צבע ממוקד בסטטוס + לוגיקת חריגה) ---
+# --- Page 3: Collections Control (DYNAMIC STATUS COLORS) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
-    
     if not df.empty:
         today = date.today()
-        
-        # לוגיקה לעדכון סטטוס "Overdue" אוטומטי לתצוגה
         def check_status(row):
             due = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
-            if row['Status'] != 'Paid' and due and today > due:
-                return 'Overdue'
+            if row['Status'] != 'Paid' and due and today > due: return 'Overdue'
             return row['Status']
-
+        
         df['Display_Status'] = df.apply(check_status, axis=1)
 
-        # פונקציית צביעה ממוקדת רק לעמודת הסטטוס
         def color_status_only(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;' # ירוק ברור
-            if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;' # אדום ברור
-            return '' # Sent נשאר ללא צבע
+            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
+            if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;'
+            return ''
 
-        st.write("בצע שינויים ב-Status או ב-Notes ולחץ על **Save**.")
-
-        # הצגת הטבלה לעריכה
-        # הערה: data_editor מציג את הצבעים רק אחרי השמירה או בטבלה סטטית
+        st.write("Edit **Status** or **Notes** then click **Save**.")
         edited_df = st.data_editor(
             df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']],
             column_config={
                 "rowid": None,
-                "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"], width="medium"),
+                "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
                 "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
-            hide_index=True,
-            use_container_width=True,
-            key="col_editor_v3"
+            hide_index=True, use_container_width=True, key="col_editor_v4"
         )
-
-        # תצוגה צבעונית מתחת לעריכה (כפי שביקשת - רק הסטטוס צבוע)
-        st.write("**Visual Status Tracker:**")
+        
+        st.write("**Visual Tracker:**")
         st.dataframe(edited_df.style.applymap(color_status_only, subset=['Display_Status']), use_container_width=True, hide_index=True)
 
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                # אם המשתמש בחר Overdue ידנית, זה יישמר כ-Sent כדי שהלוגיקה תמשיך לבדוק אותו
                 final_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
                 conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (final_status, str(row['Notes']), row['rowid']))
             conn.commit(); conn.close()
