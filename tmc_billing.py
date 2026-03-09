@@ -39,7 +39,7 @@ if page == "Email Sender":
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
-    .big-detective { font-size: 90px; text-align: center; margin-bottom: 0px; margin-top: 20px; }
+    .big-detective { font-size: 225px; text-align: center; margin-bottom: 0px; margin-top: 20px; } /* הגדלתי את הגודל כאן */
     .detective-header { font-size: 45px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
     .reverse-detective-header { font-size: 45px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
     </style>""", unsafe_allow_html=True)
@@ -77,12 +77,13 @@ if page == "Email Sender":
                     confirm = st.toggle("I confirm that data is correct", value=False)
                     allow_sending = confirm
                 if not confirm:
+                    # כאן מופיע הבלש המוגדל
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     if orphans: st.error(f"Detective Alert! Unrecognized files: {', '.join(orphans)}")
                     if missing: st.warning(f"Reverse Detective! Missing files for: {', '.join(missing)}")
         except: pass
 
-    # 2. Sender Details (החזרתי את הפירוט המלא המקורי)
+    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -152,7 +153,7 @@ elif page == "Analytics Dashboard":
         
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(df_raw['Company'].unique()))
-        m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
+        m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
         
         st.write("---")
