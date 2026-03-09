@@ -9,12 +9,12 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות עזר (צליל מחיאות כפיים) ---
+# --- פונקציות עזר (צליל מחיאות כפיים המקורי) ---
 def play_applause_sound():
-    # צליל מחיאות כפיים שיופעל בסיום מוצלח
+    # זה הקוד המדויק שבו השתמשנו בעבר להפעלת הסאונד
     sound_html = """
     <audio autoplay>
-    <source src="https://www.soundjay.com/human/sounds/applause-01.mp3" type="audio/mpeg">
+    <source src="https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3" type="audio/mpeg">
     </audio>
     """
     st.markdown(sound_html, unsafe_allow_html=True)
@@ -76,7 +76,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח
+    # חלק 2: פרטי שולח (עם הפירוט המלא של ה-App Password)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -147,7 +147,7 @@ if page == "Email Sender":
                 
                 server.quit()
                 st.balloons()
-                play_applause_sound() # הפעלת מחיאות כפיים
+                play_applause_sound() # הפעלת הסאונד המקורי
                 st.success(f"השליחה הסתיימה! {sent_count} מיילים נשלחו.")
                 time.sleep(2)
                 st.rerun()
