@@ -9,17 +9,19 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Robust Fix) ---
+# --- Audio System (Final Fix) ---
 def play_audio(url):
-    # שימוש בקוד JS שמוודא טעינה מלאה ומונע קטיעה מיידית
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
             audio.preload = "auto";
-            audio.oncanplaythrough = function() {{
-                audio.play();
-            }};
-            audio.load();
+            audio.play().catch(function(e) {{
+                console.log("Autoplay blocked, waiting for interaction");
+                // ניסיון השמעה נוסף בלחיצה כלשהי על המסך
+                document.addEventListener('click', function() {{
+                    audio.play();
+                }}, {{once: true}});
+            }});
         </script>
     """, height=0)
 
@@ -27,7 +29,6 @@ def sound_success():
     play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 
 def sound_detective(): 
-    # לינק ישיר ומהיר יותר
     play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- Database ---
@@ -103,7 +104,7 @@ if page == "Email Sender":
                 st.session_state.sound_played = False
         except: pass
 
-    # 2. Sender Details
+    # 2. Sender Details (הפירוט המלא חזר!)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -111,7 +112,16 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
@@ -148,15 +158,15 @@ if page == "Email Sender":
                     prog.progress((i + 1) / len(df))
                 
                 server.quit()
-                sound_success() # השמעת צליל הצלחה
+                sound_success()
                 st.balloons()
                 st.success(f"Done! {sent_count} emails sent.")
-                time.sleep(4) # השהיה של 4 שניות כדי לתת לצליל להסתיים לפני הרענון
+                time.sleep(4)
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics ---
+# --- Page 2: Analytics (הפיבוט חזר!) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -166,6 +176,13 @@ elif page == "Analytics Dashboard":
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
+        
+        st.write("---")
+        # טבלת פיבוט - סיכום לפי חברה
+        st.subheader("🏢 Company Pivot Summary")
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        
         st.write("---")
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
@@ -176,3 +193,5 @@ elif page == "Analytics Dashboard":
             if len(sel_range) == 2:
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
             st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+    else:
+        st.info("No data yet.")
