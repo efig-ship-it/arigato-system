@@ -9,13 +9,14 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Improved) ---
+# --- Audio System (Power Fix) ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
             audio.preload = "auto";
-            audio.play().catch(function(e) {{ console.log("Audio play failed: ", e); }});
+            audio.currentTime = 0;
+            audio.play().catch(function(e) {{ console.log("Playback error:", e); }});
         </script>
     """, height=0)
 
@@ -45,9 +46,10 @@ if page == "Email Sender":
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
-    .big-detective { font-size: 450px; text-align: center; margin-bottom: -50px; margin-top: 10px; line-height: 1; } 
-    .detective-header { font-size: 50px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
-    .reverse-detective-header { font-size: 50px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    /* בלש ענק בטירוף */
+    .big-detective { font-size: 800px; text-align: center; margin: -100px 0; line-height: 1; display: block; } 
+    .detective-header { font-size: 60px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; }
+    .reverse-detective-header { font-size: 60px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -76,6 +78,7 @@ if page == "Email Sender":
             file_names = [f.name.lower() for f in uploaded_files]
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
+            
             if orphans or missing:
                 if 'sound_played' not in st.session_state:
                     sound_detective(); st.session_state.sound_played = True
@@ -99,14 +102,9 @@ if page == "Email Sender":
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            *Standard login passwords will not work.*
-
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
+            1. [Google Security](https://myaccount.google.com/security)
+            2. Enable 2-Step Verification.
+            3. Search 'App passwords' and create one.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
@@ -135,7 +133,6 @@ if page == "Email Sender":
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
-                        
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db', check_same_thread=False)
@@ -160,10 +157,6 @@ elif page == "Analytics Dashboard":
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
-        st.write("---")
-        st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
         st.write("---")
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
