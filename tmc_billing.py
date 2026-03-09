@@ -9,11 +9,12 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות עזר (צליל) ---
-def play_success_sound():
+# --- פונקציות עזר (צליל מחיאות כפיים) ---
+def play_applause_sound():
+    # צליל מחיאות כפיים שיופעל בסיום מוצלח
     sound_html = """
     <audio autoplay>
-    <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
+    <source src="https://www.soundjay.com/human/sounds/applause-01.mp3" type="audio/mpeg">
     </audio>
     """
     st.markdown(sound_html, unsafe_allow_html=True)
@@ -43,7 +44,6 @@ if page == "Email Sender":
         hr { margin: 0.5em 0px; }
         .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
         
-        /* מרכוז כותרת ה-Due Date */
         .due-date-container {
             display: flex;
             justify-content: center;
@@ -66,7 +66,6 @@ if page == "Email Sender":
     with c1:
         up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
     with c2:
-        # החזרת כותרת Due Date הממורכזת
         st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
         mc, yc = st.columns(2)
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -77,7 +76,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח (החזרת הפירוט המלא של ה-APP PASSWORD)
+    # חלק 2: פרטי שולח
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -99,7 +98,7 @@ if page == "Email Sender":
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-    # בדיקת כפילויות לזיהוי מהיר
+    # בדיקת כפילויות
     if up_ex:
         conn = sqlite3.connect('billing_history.db')
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -148,7 +147,7 @@ if page == "Email Sender":
                 
                 server.quit()
                 st.balloons()
-                play_success_sound()
+                play_applause_sound() # הפעלת מחיאות כפיים
                 st.success(f"השליחה הסתיימה! {sent_count} מיילים נשלחו.")
                 time.sleep(2)
                 st.rerun()
@@ -156,19 +155,16 @@ if page == "Email Sender":
             except Exception as e:
                 st.error(f"שגיאה בשליחה: {e}")
         else:
-            st.error("חסרים פרטים, קבצים או רשימת תפוצה!")
+            st.error("Missing fields or files!")
 
-    # חלק 3: סיכומים וטבלת היסטוריה עם לוח שנה
+    # חלק 3: היסטוריה
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
 
     if not history_df.empty:
-        # תיקון תאריכים
         history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce').dt.date
-        
-        # כרטיסיות סיכום (Metrics)
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(history_df['Company'].unique()))
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
@@ -186,14 +182,9 @@ if page == "Email Sender":
                 start_date, end_date = sel_date_range
                 filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
             
-            # הצגה בפורמט DD-MM-YYYY בטבלה
             display_df = filtered_df.copy()
             display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else "")
             st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            if st.button("🗑️ Reset History"):
-                conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
-                st.rerun()
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
@@ -217,12 +208,8 @@ elif page == "Analytics Dashboard":
 
         # טבלת פיבוט
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({
-            'Recipients': 'sum',
-            'Files': 'sum',
-            'Date': 'max'
-        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date': 'Last Sent'}).reset_index()
-        pivot['Last Sent'] = pivot['Last Sent'].dt.strftime("%d-%m-%Y")
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
+        pivot['Date'] = pivot['Date'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
     else:
         st.info("אין נתונים היסטוריים להצגה.")
