@@ -22,8 +22,6 @@ def init_db():
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
                    (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT,
                     Status TEXT DEFAULT 'Sent', Due_Date TEXT, Notes TEXT DEFAULT '')''')
-    
-    # וידוא עמודות למניעת KeyError
     cursor = conn.execute("PRAGMA table_info(history)")
     cols = [column[1] for column in cursor.fetchall()]
     if 'Status' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Status TEXT DEFAULT 'Sent'")
@@ -42,7 +40,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender ---
+# --- Page 1: Email Sender (Untouched) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -76,7 +74,6 @@ if page == "Email Sender":
             file_names = [f.name.lower() for f in uploaded_files]
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
-            
             if orphans or missing:
                 confirm = st.toggle("🚨 I confirm all is correct", value=False)
                 allow_sending = confirm
@@ -84,12 +81,8 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: 
-                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                        st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: 
-                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing files for: {', '.join(missing)}")
+                    if orphans: st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: st.warning(f"Missing files for: {', '.join(missing)}")
         except: pass
 
     st.write("---")
@@ -99,14 +92,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
-            """)
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords' and paste here.")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -114,18 +100,14 @@ if page == "Email Sender":
                 df_master = pd.read_excel(up_ex).dropna(how='all')
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
-                
                 day_col = next((c for c in df_master.columns if 'day' in str(c).lower()), None)
                 month_idx = months.index(sel_m) + 1
-
                 for i, row in df_master.iterrows():
                     company = str(row.iloc[0]).strip()
                     emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                     company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
-                    
                     target_day = int(row[day_col]) if day_col and not pd.isna(row[day_col]) else 15
                     due_date_val = date(int(sel_y), month_idx, target_day).strftime("%Y-%m-%d")
-
                     total_amount = 0.0
                     detected_currency = "$"
                     for f in company_files:
@@ -138,7 +120,6 @@ if page == "Email Sender":
                                 elif '€' in sample_val: detected_currency = '€'
                                 df_temp[amt_col] = pd.to_numeric(df_temp[amt_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
                                 total_amount += df_temp[amt_col].sum()
-
                     if emails and company_files:
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {company} - {current_period}"
@@ -149,37 +130,35 @@ if page == "Email Sender":
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
                         server.send_message(msg)
-                        
                         conn = sqlite3.connect('billing_history.db')
                         conn.execute("INSERT INTO history (Date, Company, Recipients, Files, Amount, Sender, Currency, Status, Due_Date) VALUES (?,?,?,?,?,?,?,?,?)", 
                                      (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail, detected_currency, 'Sent', due_date_val))
                         conn.commit(); conn.close()
-                
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (RESTORED ORIGINAL PIVOTS) ---
+# --- Page 2: Analytics Dashboard (Restored with Fixes) ---
 elif page == "Analytics Dashboard":
+    st.markdown("<style>[data-testid='stMetricValue'] { font-size: 22px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        df = df.dropna(subset=['Date_obj'])
-        
         c1, c2 = st.columns(2)
         sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
-        sel_date = c2.date_input("Filter Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
-
+        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
         f_df = df.copy()
         if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
         if len(sel_date) == 2:
             f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
 
         st.divider()
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Last Sending Date", df['Date'].iloc[0])
-        m2.metric("Last Sender", df['Sender'].iloc[0])
-        m3.metric("Total Amount Filtered", f"${f_df['Amount'].sum():,.2f}")
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("Last Sending Date", df['Date'].iloc[0])
+        m_col2.metric("Last Sender", df['Sender'].iloc[0])
+        # פסיקים בסכום הכללי
+        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
+        m_col3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
 
         st.divider()
         p1, p2 = st.columns(2)
@@ -193,12 +172,13 @@ elif page == "Analytics Dashboard":
             res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum', 'Company':'count'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-
         with st.expander("📂 Full Filtered Log", expanded=True):
-            st.dataframe(f_df.drop(columns=['rowid', 'Date_obj', 'Currency', 'Due_Date', 'Status', 'Notes']), use_container_width=True, hide_index=True)
-    else: st.info("No data.")
+            log_df = f_df.copy()
+            log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(log_df[['Date', 'Company', 'Recipients', 'Files', 'Amount', 'Sender']], use_container_width=True, hide_index=True)
+    else: st.info("No data recorded.")
 
-# --- Page 3: Collections Control (COMPACT & EDITABLE) ---
+# --- Page 3: Collections Control (Editable Notes) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
@@ -209,19 +189,18 @@ elif page == "Collections Control 🔍":
             column_config={
                 "rowid": None,
                 "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"], width="medium"),
-                "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
+                "Notes": st.column_config.TextColumn("Notes / Ref", width="large"), # פתיחת הערות לכתיבה
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
             hide_index=True,
             use_container_width=True,
-            key="col_editor"
+            key="data_editor_col"
         )
-
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
                 conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (row['Status'], row['Notes'], row['rowid']))
             conn.commit(); conn.close()
-            st.success("Saved!"); time.sleep(1); st.rerun()
+            st.success("Changes saved!"); time.sleep(1); st.rerun()
     else: st.info("No records.")
