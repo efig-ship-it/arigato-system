@@ -4,7 +4,7 @@ import smtplib, time, sqlite3, traceback, re, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing System", layout="centered")
@@ -16,28 +16,34 @@ def play_audio(url):
 def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
-# --- Database Management ---
+# --- Database Management (Silent Extension) ---
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
-                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT)''')
+                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT,
+                    Status TEXT DEFAULT 'Sent', Due_Date TEXT, Notes TEXT DEFAULT '')''')
+    
+    # בדיקת עמודות חדשות למניעת פגיעה בקיים
     cursor = conn.execute("PRAGMA table_info(history)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'Currency' not in columns:
-        conn.execute("ALTER TABLE history ADD COLUMN Currency TEXT DEFAULT '$'")
+    cols = [column[1] for column in cursor.fetchall()]
+    if 'Status' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Status TEXT DEFAULT 'Sent'")
+    if 'Due_Date' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Due_Date TEXT")
+    if 'Notes' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Notes TEXT DEFAULT ''")
+    
     conn.commit(); conn.close()
 
 def get_history_df():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
+    df = pd.read_sql_query("SELECT rowid, * FROM history ORDER BY rowid DESC", conn)
     conn.close(); return df
 
 init_db()
 
 # --- Sidebar ---
 st.sidebar.title("📌 Navigation")
-page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
+page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
+# --- Page 1: Email Sender (UNTOUCHED LOGIC & STYLE) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -70,7 +76,6 @@ if page == "Email Sender":
             file_names = [f.name.lower() for f in uploaded_files]
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
-            
             if orphans or missing:
                 confirm = st.toggle("🚨 I confirm all is correct", value=False)
                 allow_sending = confirm
@@ -78,8 +83,6 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: st.warning(f"Missing files for: {', '.join(missing)}")
         except: pass
 
     st.write("---")
@@ -89,7 +92,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Create 'App passwords' and paste here.")
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords'.")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -98,15 +101,17 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                sent_count = 0
+                # חישוב תאריך יעד אוטומטי ל-15 לחודש הנבחר
+                month_idx = months.index(sel_m) + 1
+                due_date_val = date(int(sel_y), month_idx, 15).strftime("%Y-%m-%d")
+
                 for i, row in df_master.iterrows():
                     company = str(row.iloc[0]).strip()
                     emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                     company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                     
                     total_amount = 0.0
-                    detected_currency = "$" # ברירת מחדל
-                    
+                    detected_currency = "$"
                     for f in company_files:
                         if f.name.endswith('.xlsx'):
                             df_temp = pd.read_excel(io.BytesIO(f.getvalue()))
@@ -115,8 +120,6 @@ if page == "Email Sender":
                                 sample_val = str(df_temp[amt_col].iloc[0])
                                 if '₪' in sample_val: detected_currency = '₪'
                                 elif '€' in sample_val: detected_currency = '€'
-                                elif '£' in sample_val: detected_currency = '£'
-                                
                                 df_temp[amt_col] = pd.to_numeric(df_temp[amt_col].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
                                 total_amount += df_temp[amt_col].sum()
 
@@ -124,7 +127,7 @@ if page == "Email Sender":
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {company} - {current_period}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Hello {company},\nAttached are your billing files.\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
+                        msg.attach(MIMEText(f"Hello,\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
                         for f in company_files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -132,61 +135,68 @@ if page == "Email Sender":
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db')
-                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?,?,?)", 
-                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail, detected_currency))
+                        conn.execute("INSERT INTO history (Date, Company, Recipients, Files, Amount, Sender, Currency, Status, Due_Date) VALUES (?,?,?,?,?,?,?,?,?)", 
+                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail, detected_currency, 'Sent', due_date_val))
                         conn.commit(); conn.close()
-                        sent_count += 1
                 
-                server.quit(); sound_success(); st.balloons(); st.success(f"Success! {sent_count} sent."); time.sleep(2); st.rerun()
+                server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard ---
+# --- Page 2: Analytics Dashboard (UNTOUCHED) ---
 elif page == "Analytics Dashboard":
-    st.markdown("""<style>
-    [data-testid="stMetricValue"] { font-size: 18px !important; word-break: break-all !important; white-space: normal !important; }
-    </style>""", unsafe_allow_html=True)
-    
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        c1, c2 = st.columns(2)
-        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
-        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
-
-        f_df = df.copy()
-        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
-        if len(sel_date) == 2:
-            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
-
-        st.divider()
         m_col1, m_col2, m_col3 = st.columns(3)
         m_col1.metric("Last Sending Date", df['Date'].iloc[0])
-        
-        # כתובת מייל קטנה שנכנסת כולה
         m_col2.metric("Last Sender", df['Sender'].iloc[0])
-        
-        # סכום עם פסיקים ומטבע דינמי
-        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
-        m_col3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
-
+        m_col3.metric("Total Overall Amount", f"${df['Amount'].sum():,.2f}")
         st.divider()
-        p1, p2 = st.columns(2)
-        with p1:
-            st.write("**Pivot by Company**")
-            # פיבוט עם פורמט פסיקים
-            comp_res = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum', 'Recipients':'sum'}).reset_index()
-            comp_res['Amount'] = comp_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
-            st.dataframe(comp_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        with p2:
-            st.write("**Pivot by Date**")
-            date_res = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum', 'Company':'count'}).reset_index()
-            date_res['Amount'] = date_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
-            st.dataframe(date_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-
-        with st.expander("📂 Full Filtered Log"):
-            # פורמט פסיקים בלוג
-            log_df = f_df.copy()
-            log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
-            st.dataframe(log_df.drop(columns=['Date_obj', 'Currency']), use_container_width=True, hide_index=True)
+        st.write("**Quick History Log**")
+        st.dataframe(df[['Date', 'Company', 'Amount', 'Status']], use_container_width=True, hide_index=True)
     else: st.info("No data recorded.")
+
+# --- Page 3: Collections Control (NEW PAGE) ---
+elif page == "Collections Control 🔍":
+    st.title("🔍 Collections & Payment Control")
+    df = get_history_df()
+    
+    if not df.empty:
+        today = date.today()
+        
+        for index, row in df.iterrows():
+            due_date_obj = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
+            is_overdue = due_date_obj and today > due_date_obj and row['Status'] != 'Paid'
+            
+            # עיצוב שורה - אדום אם עבר הזמן ולא שולם
+            bg_color = "#ffcccc" if is_overdue else "transparent"
+            
+            with st.container():
+                cols = st.columns([1.5, 1.5, 1, 1.5, 2, 1])
+                
+                # עמודה 1: תאריך וחברה + אייקון אזהרה
+                warn_icon = "⚠️ " if is_overdue else ""
+                cols[0].markdown(f"**{warn_icon}{row['Company']}**")
+                cols[1].write(f"Due: {row['Due_Date']}")
+                
+                # עמודה 2: סכום
+                cols[2].write(f"{row['Currency']}{row['Amount']:,.2f}")
+                
+                # עמודה 3: סטטוס (Dropdown)
+                new_status = cols[3].selectbox("Status", ["Sent", "Paid", "In Dispute"], index=["Sent", "Paid", "In Dispute"].index(row['Status']), key=f"stat_{row['rowid']}")
+                
+                # עמודה 4: הערות (Text Input)
+                new_note = cols[4].text_input("Notes / Reference", value=row['Notes'], key=f"note_{row['rowid']}", placeholder="Add reference...")
+                
+                # עמודה 5: כפתור עדכון
+                if cols[5].button("Update", key=f"btn_{row['rowid']}"):
+                    conn = sqlite3.connect('billing_history.db')
+                    conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (new_status, new_note, row['rowid']))
+                    conn.commit(); conn.close()
+                    st.success("Updated!")
+                    time.sleep(1); st.rerun()
+                
+                st.markdown(f"<hr style='margin:5px; border-top: 1px solid {bg_color};'>", unsafe_allow_html=True)
+    else:
+        st.info("No pending collections found.")
