@@ -9,20 +9,26 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Power Fix) ---
+# --- Audio System (Robust Fix) ---
 def play_audio(url):
+    # שימוש בקוד JS שמוודא טעינה מלאה ומונע קטיעה מיידית
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
             audio.preload = "auto";
+            audio.oncanplaythrough = function() {{
+                audio.play();
+            }};
             audio.load();
-            audio.currentTime = 0;
-            audio.play().catch(function(e) {{ console.log("Playback error:", e); }});
         </script>
     """, height=0)
 
-def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
-def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
+def sound_success(): 
+    play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
+
+def sound_detective(): 
+    # לינק ישיר ומהיר יותר
+    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- Database ---
 def init_db():
@@ -41,14 +47,11 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- Page 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
-    
-    /* הגדרות הבלש המוגדל */
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
@@ -83,7 +86,8 @@ if page == "Email Sender":
             
             if orphans or missing:
                 if 'sound_played' not in st.session_state:
-                    sound_detective(); st.session_state.sound_played = True
+                    sound_detective()
+                    st.session_state.sound_played = True
                 with st.info("🚨 **Action Required: Data Validation**"):
                     confirm = st.toggle("I confirm that data is correct", value=False)
                     allow_sending = confirm
@@ -107,11 +111,7 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            1. [Google Security](https://myaccount.google.com/security)
-            2. Enable 2-Step Verification.
-            3. Search 'App passwords' and create one.
-            """)
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
@@ -147,9 +147,12 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 
-                server.quit(); sound_success(); st.balloons()
+                server.quit()
+                sound_success() # השמעת צליל הצלחה
+                st.balloons()
                 st.success(f"Done! {sent_count} emails sent.")
-                time.sleep(2); st.rerun()
+                time.sleep(4) # השהיה של 4 שניות כדי לתת לצליל להסתיים לפני הרענון
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
