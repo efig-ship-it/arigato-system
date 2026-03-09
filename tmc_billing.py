@@ -23,12 +23,8 @@ def play_audio(url):
         </script>
     """, height=0)
 
-def sound_success(): 
-    play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
-
-def sound_detective(): 
-    # לינק ישיר ומהיר לכינור
-    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
+def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
+def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
 
 # --- Database ---
 def init_db():
@@ -85,12 +81,10 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                # הצגת תיבת האישור תמיד כשיש טעות
-                with st.warning("🚨 **Data Validation Required**"):
-                    confirm = st.toggle("I confirm all is correct and I am ready to send", key="validation_toggle")
-                    allow_sending = confirm
+                # הצגת כפתור האישור - הוא חייב להיות בחוץ כדי להשפיע על allow_sending
+                confirm = st.toggle("🚨 I confirm data is correct (Hides Detective & Enables Sending)", value=False)
+                allow_sending = confirm
 
-                # כל האלמנטים הוויזואליים (כולל כותרות) נעלמים ב-Confirm
                 if not confirm:
                     if 'sound_triggered' not in st.session_state:
                         sound_detective()
@@ -104,11 +98,9 @@ if page == "Email Sender":
                         st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
                         st.warning(f"Missing files for: {', '.join(missing)}")
                 else:
-                    if 'sound_triggered' in st.session_state:
-                        del st.session_state.sound_triggered
+                    if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
             else:
-                if 'sound_triggered' in st.session_state:
-                    del st.session_state.sound_triggered
+                if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
         except: pass
 
     # 2. Sender Details
@@ -119,16 +111,15 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Enable **2-Step Verification**.
-            3. Search **'App passwords'** and create one.
-            """)
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
+    # כפתור השליחה
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
-        if up_ex and uploaded_files and user_mail:
+        if not user_mail or not user_pass:
+            st.error("Please enter Gmail Address and App Password!")
+        elif up_ex and uploaded_files:
             try:
                 df = pd.read_excel(up_ex).dropna(how='all')
                 prog = st.progress(0)
@@ -159,15 +150,13 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 
-                server.quit()
-                sound_success()
-                st.balloons()
-                st.success(f"Done! {sent_count} emails sent.")
-                time.sleep(4); st.rerun()
+                server.quit(); sound_success(); st.balloons()
+                st.success(f"Done! {sent_count} emails sent."); time.sleep(4); st.rerun()
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Sending Error: {str(e)}")
+                with st.expander("Show Technical Details"): st.code(traceback.format_exc())
 
-# --- Page 2: Analytics Dashboard ---
+# --- Page 2: Analytics ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -177,12 +166,11 @@ elif page == "Analytics Dashboard":
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
-        
         st.write("---")
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
-        
+        st.write("---")
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
