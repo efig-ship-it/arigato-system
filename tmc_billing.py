@@ -9,17 +9,9 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציית סאונד משופרת (עוקפת חסימות דפדפן) ---
+# --- פונקציות סאונד ---
 def play_sound(url):
-    # הזרקת קוד שמפעיל את הסאונד רק בעקבות לחיצה
-    st.components.v1.html(f"""
-        <script>
-            var audio = new Audio("{url}");
-            audio.play().catch(function(error) {{
-                console.log("Autoplay was prevented. Please click anywhere on the page first.");
-            }});
-        </script>
-    """, height=0)
+    st.components.v1.html(f"""<script>var audio = new Audio("{url}"); audio.play();</script>""", height=0)
 
 # --- ניהול בסיס נתונים ---
 def init_db():
@@ -30,7 +22,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def get_history():
+def get_history_from_db():
     conn = sqlite3.connect('billing_history.db')
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
@@ -38,14 +30,17 @@ def get_history():
 
 init_db()
 
-# תפריט ניווט
+# תפריט ניווט בצד
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
+# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
-    st.markdown("""<style>.stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
+    st.markdown("""<style>
+    .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
     .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
-    .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }</style>""", unsafe_allow_html=True)
+    .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }
+    </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
 
@@ -70,17 +65,13 @@ if page == "Email Sender":
         try:
             df_ex = pd.read_excel(up_ex)
             excel_comps = [str(c).strip().lower() for c in df_ex.iloc[:, 0].dropna().unique()]
-            orphans = [f.name for f in uploaded_files if not any(c in f.name.lower() for c in excel_comps)]
+            orphans = [f.name for f in uploaded_files if not any(c in f.name.lower() for comp in excel_comps)]
             if orphans:
                 st.error(f"🕵️‍♂️ **הבלש מצא קבצים ללא שיוך:** {', '.join(orphans)}")
-                # שימוש ב-Toggle מעוצב לאישור
-                allow_sending = st.toggle("אני מאשר שהנתונים תקינים למרות התראת הבלש ✅", value=False)
-                if not allow_sending:
-                    # השמעת צליל התראה קצר לבלש
-                    play_sound("https://www.soundjay.com/buttons/sounds/button-4.mp3")
+                allow_sending = st.toggle("אני מאשר שהנתונים תקינים ✅", value=False)
         except: pass
 
-    # 2. Sender Details (פירוט ה-App Password המקורי נשמר כאן במלואו)
+    # 2. Sender Details (הפירוט המלא נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -122,6 +113,7 @@ if page == "Email Sender":
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
                         server.send_message(msg)
+                        
                         conn = sqlite3.connect('billing_history.db')
                         conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
                                            (datetime.now().strftime("%Y-%m-%d"), company, len(emails), len(files)))
@@ -129,36 +121,56 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 server.quit()
-                st.balloons()
-                # מחיאות כפיים בסיום
-                play_sound("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
+                st.balloons(); play_sound("https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3")
                 st.success(f"Success! {sent_count} emails sent."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-    # 3. היסטוריה - תוקן למניעת ValueError וסידור תאריכים
-    st.write("---")
-    history_df = get_history()
-    if not history_df.empty:
-        history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Companies", len(history_df['Company'].unique()))
-        m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-        last_date = history_df['Date_obj'].max()
-        # הצגת Last Sent בפורמט DD/MM/YYYY
-        m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
-
-        # הצגת הטבלה בפורמט DD-MM-YYYY
-        display_df = history_df.drop(columns=['Date_obj']).copy()
-        display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-
+# --- עמוד 2: Analytics Dashboard (התוספת החדשה לבקשתך) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
-    df_raw = get_history()
+    df_raw = get_history_from_db()
+
     if not df_raw.empty:
+        # פתרון ה-ValueError מהתמונה: המרה בטוחה של תאריכים
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        
+        # שורת ה-Metrics (החלק העליון מהתמונה שלך)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Companies", len(df_raw['Company'].unique()))
+        m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
+        last_date = df_raw['Date_obj'].max()
+        m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
+
+        st.write("---")
+
+        # טבלה ופילטרים ניתנים לקיפול (Expander)
+        with st.expander("📂 View Activity Log & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            sel_date_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
+
+            filtered_df = df_raw.copy()
+            
+            # החלת פילטר חברה
+            if sel_comp:
+                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            
+            # החלת פילטר לוח שנה (תאריכים)
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
+                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            
+            # תיקון תצוגת התאריך בטבלה לפורמט DD-MM-YYYY
+            display_df = filtered_df.drop(columns=['Date_obj']).copy()
+            display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+        # סיכום פיבוט לפי חברה
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
-        # פורמט תאריך בפיבוט
         pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
+
+    else:
+        st.info("No data recorded yet. Send some emails to see analytics!")
