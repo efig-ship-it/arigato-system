@@ -9,7 +9,12 @@ from datetime import datetime, date
 # הגדרות דף
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציית סאונד מחיאות כפיים ---
+# --- פונקציית סאונד להתראות בלש ---
+def play_detective_alert():
+    # צליל התראה קצר כדי למשוך את תשומת הלב לבלש
+    audio_url = "https://www.soundjay.com/buttons/sounds/button-4.mp3"
+    st.components.v1.html(f"""<audio autoplay><source src="{audio_url}" type="audio/mpeg"></audio>""", height=0)
+
 def play_applause_sound():
     audio_url = "https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3"
     st.components.v1.html(f"""<audio autoplay><source src="{audio_url}" type="audio/mpeg"></audio>""", height=0)
@@ -61,17 +66,37 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # התראת בלש 🕵️‍♂️
+    # --- מנגנון התראות ואישור משתמש ---
+    allow_sending = True
+    
     if up_ex and uploaded_files:
         try:
             df_excel = pd.read_excel(up_ex)
             excel_companies = [str(c).strip().lower() for c in df_excel.iloc[:, 0].dropna().unique()]
             orphaned = [f.name for f in uploaded_files if not any(comp in f.name.lower() for comp in excel_companies)]
-            if orphaned:
-                st.error(f"🕵️‍♂️ **עצור!** מצאתי קבצים שלא משויכים לאף חברה באקסל: `{', '.join(orphaned)}`")
+            
+            # בדיקת כפילויות
+            conn = sqlite3.connect('billing_history.db')
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            already_sent_today = pd.read_sql_query(f"SELECT Company FROM history WHERE Date='{today_str}'", conn)['Company'].str.lower().tolist()
+            conn.close()
+            duplicates = [c for c in excel_companies if c in already_sent_today]
+
+            # אם נמצאה בעיה
+            if orphaned or duplicates:
+                play_detective_alert()
+                if orphaned:
+                    st.error(f"🕵️‍♂️ **הבלש מצא בעיה:** הקבצים הבאים לא משויכים לאף חברה באקסל: `{', '.join(orphaned)}`")
+                if duplicates:
+                    st.warning(f"⚠️ **כפילות נמצאה:** כבר שלחת היום ל: `{', '.join(duplicates)}`")
+                
+                # מחסום האישור
+                st.write("---")
+                user_confirmation = st.checkbox("סקרתי את ההתראות ואני מאשר שהנתונים תקינים לשליחה ✅")
+                allow_sending = user_confirmation
         except: pass
 
-    # חלק 2: פרטי שולח (הפירוט המלא שהבטחתי לא לשנות)
+    # חלק 2: פרטי שולח
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -93,7 +118,8 @@ if page == "Email Sender":
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
-    if st.button("🚀 Start Bulk Sending", use_container_width=True):
+    # כפתור השליחה - מושבת אם לא אושר
+    if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
             try:
                 df = pd.read_excel(up_ex)
@@ -129,6 +155,8 @@ if page == "Email Sender":
                 st.success(f"Success! {sent_count} emails sent.")
                 time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
+        else:
+            st.error("Missing fields or files!")
 
     # חלק 3: היסטוריה
     st.write("---")
@@ -138,34 +166,14 @@ if page == "Email Sender":
 
     if not history_df.empty:
         history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Companies", len(history_df['Company'].unique()))
-        m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-        last_date = history_df['Date_obj'].max()
-        m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
-
-        with st.expander("📊 View History & Filters", expanded=True):
-            f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique().tolist()))
-            sel_date_range = f2.date_input("Date Range", value=[])
-
-            filtered_df = history_df.copy()
-            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            if len(sel_date_range) == 2:
-                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
-                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
-            
-            display_df = filtered_df.drop(columns=['Date_obj']).copy()
-            display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        display_df = history_df.drop(columns=['Date_obj']).copy()
+        display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
-    conn = sqlite3.connect('billing_history.db')
-    df_raw = pd.read_sql_query("SELECT * FROM history", conn); conn.close()
-    
+    conn = sqlite3.connect('billing_history.db'); df_raw = pd.read_sql_query("SELECT * FROM history", conn); conn.close()
     if not df_raw.empty:
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
         st.subheader("🏢 Company Pivot Summary")
