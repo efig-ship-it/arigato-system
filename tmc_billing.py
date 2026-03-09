@@ -24,7 +24,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- עמוד 1: Email Sender (האתר הראשי שלך) ---
+# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""
         <style>
@@ -56,7 +56,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח (הפירוט המלא הוחזר!)
+    # חלק 2: פרטי שולח
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -81,7 +81,6 @@ if page == "Email Sender":
     if up_ex:
         conn = sqlite3.connect('billing_history.db')
         today_str = datetime.now().strftime("%Y-%m-%d")
-        # בודקים אם יש חברות מהאקסל שכבר מופיעות בבסיס הנתונים מהיום
         already_sent_today = pd.read_sql_query(f"SELECT Company FROM history WHERE Date='{today_str}'", conn)['Company'].tolist()
         conn.close()
         
@@ -134,14 +133,19 @@ if page == "Email Sender":
         else:
             st.error("Missing fields or files!")
 
-    # חלק 3: הטבלה המקורית והסיכומים (הוחזרו לאתר הראשי!)
+    # חלק 3: היסטוריה (כאן בוצע התיקון המרכזי)
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
 
     if not history_df.empty:
-        history_df['Date'] = pd.to_datetime(history_df['Date']).dt.date
+        # --- תיקון השגיאה (שורה 144 במקור) ---
+        history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce')
+        history_df = history_df.dropna(subset=['Date']) # מסיר שורות עם תאריך לא תקין
+        history_df['Date'] = history_df['Date'].dt.date
+        # ------------------------------------
+
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(history_df['Company'].unique()))
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
@@ -166,7 +170,7 @@ if page == "Email Sender":
                 conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
                 st.rerun()
 
-# --- עמוד 2: Analytics Dashboard (הדף החדש) ---
+# --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     
@@ -175,7 +179,9 @@ elif page == "Analytics Dashboard":
     conn.close()
 
     if not df_raw.empty:
-        df_raw['Date'] = pd.to_datetime(df_raw['Date'])
+        # תיקון תאריכים גם כאן למניעת שגיאות בתצוגה
+        df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        df_raw = df_raw.dropna(subset=['Date'])
         
         # חיפוש חופשי וציר זמן
         st.subheader("🔍 Free Search & Timeline")
