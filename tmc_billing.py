@@ -4,9 +4,9 @@ import smtplib, time, sqlite3, traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
-# --- Page Config ---
+# --- Page Config (Original Layout) ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
 # --- Audio System ---
@@ -60,7 +60,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", accept_multiple_files=True)
 
-    # Detective Logic (נשמר כפי שאהבת)
+    # Detective Logic
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -96,7 +96,7 @@ if page == "Email Sender":
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
             try:
-                df = pd.read_excel(up_ex).dropna(how='all') # ניקוי שורות ריקות לגמרי
+                df = pd.read_excel(up_ex).dropna(how='all')
                 prog = st.progress(0)
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
@@ -104,49 +104,61 @@ if page == "Email Sender":
                 sent_count = 0
                 for i, row in df.iterrows():
                     company = str(row.iloc[0]).strip()
-                    # פתרון לשגיאת הנמענים: ניקוי יסודי של כתובות המייל
                     raw_emails = str(row.iloc[1]).split(',')
                     emails = [e.strip() for e in raw_emails if '@' in e and '.' in e]
-                    
                     files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                     
-                    if emails and files: # שולח רק אם יש נמענים חוקיים וקבצים
+                    if emails and files:
                         msg = MIMEMultipart()
                         msg['Subject'] = f"{user_subj} - {company}"
-                        msg['To'] = ", ".join(emails)
                         msg.attach(MIMEText(f"Attached files for {company}.\nPeriod: {current_period}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
-                        
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db', check_same_thread=False)
                         conn.execute("INSERT INTO history VALUES (?, ?, ?, ?)", (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files)))
                         conn.commit(); conn.close()
                         sent_count += 1
-                    
                     prog.progress((i + 1) / len(df))
                 
                 server.quit(); st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent.")
                 time.sleep(2); st.rerun()
             except Exception as e:
-                st.error(f"❌ Critical Error: {str(e)}")
-                with st.expander("Show Details"): st.code(traceback.format_exc())
+                st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics ---
+# --- Page 2: Analytics Dashboard (Calendar is BACK) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
+        # המרה בטוחה של התאריכים לפורמט של לוח שנה
+        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], dayfirst=True, errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
+        
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
-        with st.expander("📂 Activity Log", expanded=True):
-            st.dataframe(df_raw, use_container_width=True, hide_index=True)
+        
+        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            
+            # החזרת הלוח שנה
+            sel_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
+            
+            filtered_df = df_raw.copy()
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & 
+                                          (filtered_df['Date_obj'].dt.date <= sel_range[1])]
+            
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+    else: st.info("No data yet.")
