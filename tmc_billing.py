@@ -4,9 +4,9 @@ import smtplib, time, sqlite3, traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
-# הגדרות דף
+# --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
 # --- Audio System ---
@@ -22,79 +22,172 @@ def init_db():
     conn.execute('CREATE TABLE IF NOT EXISTS history (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)')
     conn.commit(); conn.close()
 
+def get_history_df():
+    conn = sqlite3.connect('billing_history.db', check_same_thread=False)
+    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
+    conn.close(); return df
+
 init_db()
 
-# Navigation
+# --- Sidebar Navigation ---
+st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
+# --- Page 1: Email Sender ---
 if page == "Email Sender":
+    st.markdown("""<style>
+    .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
+    .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
+    .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
+    .big-detective { font-size: 90px; text-align: center; margin-bottom: 0px; margin-top: 20px; }
+    .detective-header { font-size: 45px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    .reverse-detective-header { font-size: 45px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    </style>""", unsafe_allow_html=True)
+
     st.title("TMC Billing System")
 
-    # 1. Files & Setup
+    # 1. Setup & Files
     st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
-    up_ex = c1.file_uploader("Mailing List", type=['xlsx'], label_visibility="collapsed")
-    
-    # Due Date (English Dashboard style)
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    sel_m = c2.selectbox("Mo", months, index=datetime.now().month - 1)
-    sel_y = c2.selectbox("Yr", ["2025", "2026", "2027"], index=1)
-    period = f"{sel_m} {sel_y}"
+    with c1:
+        up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
+    with c2:
+        st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
+        mc, yc = st.columns(2)
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1, label_visibility="collapsed")
+        sel_y = yc.selectbox("Yr", ["2025", "2026", "2027"], index=1, label_visibility="collapsed")
+        current_period = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload all Invoices", accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # Detective Logic
-    allow_send = True
+    # --- Detective Logic ---
+    allow_sending = True
     if up_ex and uploaded_files:
-        df_ex = pd.read_excel(up_ex)
-        comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
-        f_names = [f.name.lower() for f in uploaded_files]
-        missing = [c for c in comps if not any(c.lower() in fn for fn in f_names)]
-        
-        if missing:
-            sound_detective()
-            st.markdown(f'<p style="font-size:80px; text-align:center;">🕵️‍♂️</p>', unsafe_allow_html=True)
-            st.error(f"Reverse Detective: Missing files for {', '.join(missing)}")
-            confirm = st.toggle("I confirm data is correct and want to proceed", value=False)
-            allow_send = confirm
+        try:
+            df_ex = pd.read_excel(up_ex)
+            excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
+            file_names = [f.name.lower() for f in uploaded_files]
+            
+            orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
+            missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
-    # 2. Sender Details (Full info kept)
+            if orphans or missing:
+                if 'sound_played' not in st.session_state:
+                    sound_detective(); st.session_state.sound_played = True
+                
+                with st.info("🚨 **Action Required: Data Validation**"):
+                    confirm = st.toggle("I confirm that data is correct and I want to proceed", value=False)
+                    allow_sending = confirm
+
+                if not confirm:
+                    if orphans:
+                        st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files (No company in Excel): {', '.join(orphans)}")
+                    if missing:
+                        if not orphans: st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        for comp in missing:
+                            st.warning(f"⚠️ {comp} appears in the list, but no file was found!")
+            else: st.session_state.sound_played = False
+        except: pass
+
+    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
-    sc1, sc2 = st.columns(2)
-    u_mail = sc1.text_input("Gmail Address")
-    u_pass = sc2.text_input("App Password", type="password")
+    sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
+    user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
+    user_pass = sc2.text_input("App Password", type="password")
+    with sc3:
+        with st.expander("🔑 How to create an App Password?"):
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
 
-    if st.button("🚀 Start Bulk Sending", disabled=not allow_send, use_container_width=True):
-        if up_ex and uploaded_files and u_mail:
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
+
+    user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
+
+    if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
+        if up_ex and uploaded_files and user_mail:
             try:
                 df = pd.read_excel(up_ex)
-                server = smtplib.SMTP("smtp.gmail.com", 587)
-                server.starttls()
-                server.login(u_mail.strip(), u_pass.replace(" ", ""))
+                prog = st.progress(0)
+                server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
+                server.login(user_mail.strip(), user_pass.replace(" ", ""))
                 
-                count = 0
+                sent_count = 0
                 for i, row in df.iterrows():
-                    comp = str(row.iloc[0]).strip()
-                    target_files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
-                    if target_files:
-                        # Logic to send... (simplified for stability)
-                        count += 1
-                        # Save to DB
+                    company = str(row.iloc[0]).strip()
+                    emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
+                    files = [f for f in uploaded_files if company.lower() in f.name.lower()]
+                    
+                    if files and emails:
+                        msg = MIMEMultipart()
+                        msg['Subject'] = f"{user_subj} - {company}"
+                        msg.attach(MIMEText(f"Attached files for {company}.\nPeriod: {current_period}", 'plain'))
+                        for f in files:
+                            part = MIMEApplication(f.getvalue(), Name=f.name)
+                            part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+                            msg.attach(part)
+                        server.send_message(msg)
+                        
                         conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-                        conn.execute("INSERT INTO history VALUES (?, ?, ?, ?)", (datetime.now().strftime("%Y-%m-%d"), comp, 1, len(target_files)))
+                        conn.execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
+                                    (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files)))
                         conn.commit(); conn.close()
+                        sent_count += 1
+                    prog.progress((i + 1) / len(df))
                 
                 server.quit(); st.balloons(); sound_success()
-                st.success(f"Successfully sent {count} emails!")
-            except Exception:
-                # כאן שיפרתי את הודעת השגיאה - היא תציג את הכל!
-                st.error("❌ Critical Error detected!")
-                st.code(traceback.format_exc()) # זה ידפיס את השגיאה המדויקת
+                st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error Detail: {str(e)}")
+                with st.expander("Show Technical details"): st.code(traceback.format_exc())
 
+# --- Page 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Data Analytics")
-    conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-    df = pd.read_sql_query("SELECT * FROM history", conn)
-    conn.close()
-    st.dataframe(df, use_container_width=True)
+    st.title("📊 Data Analytics Dashboard")
+    df_raw = get_history_df()
+
+    if not df_raw.empty:
+        # Metrics Row
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Companies", len(df_raw['Company'].unique()))
+        m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
+        m3.metric("Last Activity", df_raw['Date'].iloc[0])
+
+        st.write("---")
+
+        # Pivot Summary Table
+        st.subheader("🏢 Company Pivot Summary")
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
+
+        st.write("---")
+
+        # Detailed Log & Filters
+        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            
+            # Safe Calendar
+            df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], dayfirst=True, errors='coerce')
+            sel_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
+            
+            filtered_df = df_raw.copy()
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
+            
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+            
+        if st.sidebar.button("🗑️ Reset All History"):
+            conn = sqlite3.connect('billing_history.db', check_same_thread=False); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
+    else: st.info("No data recorded yet.")
