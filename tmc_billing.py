@@ -35,7 +35,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (UNTOUCHED) ---
+# --- Page 1: Email Sender (The Detective & App Password) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -76,8 +76,12 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: st.warning(f"Missing files for: {', '.join(missing)}")
+                    if orphans: 
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: 
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        st.warning(f"Missing files for: {', '.join(missing)}")
         except: pass
 
     st.write("---")
@@ -87,7 +91,14 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords'.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -132,53 +143,62 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (UNTOUCHED) ---
+# --- Page 2: Analytics Dashboard (FIXED SHAGIA) ---
 elif page == "Analytics Dashboard":
-    st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
+    st.markdown("<style>[data-testid='stMetricValue'] { font-size: 18px !important; word-break: break-all !important; white-space: normal !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        c1, c2 = st.columns(3)
-        c1.metric("Last Sending Date", df['Date'].iloc[0])
-        c2.metric("Last Sender", df['Sender'].iloc[0])
-        c3_val = f"${df['Amount'].sum():,.2f}"
-        st.columns(3)[2].metric("Total Amount Filtered", c3_val)
+        c1, c2 = st.columns(2)
+        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
+        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
+        
+        f_df = df.copy()
+        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
+        if len(sel_date) == 2:
+            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
+
+        st.divider()
+        m1, m2, m3 = st.columns(3) # כאן היה התיקון ל-ValueError
+        m1.metric("Last Date", df['Date'].iloc[0])
+        m2.metric("Last Sender", df['Sender'].iloc[0])
+        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
+        m3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
+
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Pivot by Company**")
-            res1 = df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res1['Amount'] = res1.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res1.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with p2:
             st.write("**Pivot by Date**")
-            res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
+        
         with st.expander("📂 Full Filtered Log", expanded=True):
-            log_df = df.copy()
+            log_df = f_df.copy()
             log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(log_df[['Date', 'Company', 'Recipients', 'Files', 'Amount', 'Sender']], use_container_width=True, hide_index=True)
+    else: st.info("No data.")
 
-# --- Page 3: Collections Control (DYNAMIC ROW COLORING) ---
+# --- Page 3: Collections Control (COLOR CODED) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
-    
     if not df.empty:
-        # פונקציה לצביעת השורות בצורה ברורה
+        # פונקציית צביעת שורות
         def style_rows(row):
-            if row.Status == 'Paid':
-                return ['background-color: #c8e6c9; color: #1b5e20; font-weight: bold'] * len(row)
-            if row.Status == 'Sent':
-                return ['background-color: #ffcdd2; color: #b71c1c; font-weight: bold'] * len(row)
+            if row.Status == 'Paid': return ['background-color: #c8e6c9; color: #1b5e20; font-weight: bold'] * len(row)
+            if row.Status == 'Sent': return ['background-color: #ffcdd2; color: #b71c1c; font-weight: bold'] * len(row)
             return [''] * len(row)
 
-        st.write("Edit **Status** or **Notes** below. Colors update after clicking **Save**.")
-
+        st.write("Edit **Status** or **Notes** (Click twice to edit). Colors update after **Save**.")
+        
         # הטבלה המעוצבת והניתנת לעריכה
-        # כאן אני משתמש ב-style ישירות על ה-editor
         styled_df = df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']].style.apply(style_rows, axis=1)
 
         edited_df = st.data_editor(
@@ -198,10 +218,8 @@ elif page == "Collections Control 🔍":
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                # וידוא ששורות שאין בהן הערה לא יגרמו לשגיאה
                 note_val = str(row['Notes']) if row['Notes'] is not None else ""
                 conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (row['Status'], note_val, row['rowid']))
             conn.commit(); conn.close()
             st.success("Successfully Saved!"); time.sleep(1); st.rerun()
-    else:
-        st.info("No records.")
+    else: st.info("No records.")
