@@ -11,7 +11,6 @@ st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
 # --- פונקציות עזר (צליל) ---
 def play_success_sound():
-    # הקוד המובנה שכבר היה לנו
     sound_html = """
     <audio autoplay>
     <source src="https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3" type="audio/mpeg">
@@ -43,6 +42,19 @@ if page == "Email Sender":
         .stVerticalBlock { gap: 0.4rem; }
         hr { margin: 0.5em 0px; }
         .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
+        
+        /* מרכוז כותרת ה-Due Date */
+        .due-date-container {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 2px;
+        }
+        .due-date-label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #31333F;
+        }
         </style>
         """, unsafe_allow_html=True)
 
@@ -54,20 +66,37 @@ if page == "Email Sender":
     with c1:
         up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
     with c2:
+        # החזרת כותרת Due Date הממורכזת
+        st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
+        mc, yc = st.columns(2)
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        sel_m = st.selectbox("Mo", months, index=datetime.now().month - 1)
+        sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1, label_visibility="collapsed")
         years = [str(y) for y in range(datetime.now().year - 1, datetime.now().year + 3)]
-        sel_y = st.selectbox("Yr", years, index=1)
+        sel_y = yc.selectbox("Yr", years, index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח
+    # חלק 2: פרטי שולח (החזרת הפירוט המלא של ה-APP PASSWORD)
     st.write("---")
     st.subheader("2. Sender Details")
-    sc1, sc2 = st.columns(2)
+    sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
     user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
     user_pass = sc2.text_input("App Password", type="password")
+    
+    with sc3:
+        with st.expander("🔑 How to create an App Password?"):
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
+
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
     # בדיקת כפילויות לזיהוי מהיר
@@ -109,7 +138,6 @@ if page == "Email Sender":
                             msg.attach(part)
                         server.send_message(msg)
                         
-                        # רישום בהיסטוריה
                         conn = sqlite3.connect('billing_history.db')
                         conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
                                            (datetime.now().strftime("%Y-%m-%d"), company, len(emails), len(files)))
@@ -119,37 +147,53 @@ if page == "Email Sender":
                     prog.progress((i + 1) / len(df))
                 
                 server.quit()
-                
-                # הפעלת אפקטים (בלונים + סאונד מובנה)
                 st.balloons()
                 play_success_sound()
                 st.success(f"השליחה הסתיימה! {sent_count} מיילים נשלחו.")
                 time.sleep(2)
-                st.rerun() # מרענן את הדף כדי לעדכן טבלאות ודשבורד
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"שגיאה בשליחה: {e}")
         else:
             st.error("חסרים פרטים, קבצים או רשימת תפוצה!")
 
-    # חלק 3: טבלת היסטוריה מתוקנת
+    # חלק 3: סיכומים וטבלת היסטוריה עם לוח שנה
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
 
     if not history_df.empty:
-        # תיקון התאריך למניעת קריסה (כאן הייתה השגיאה שלך)
-        history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce')
-        history_df = history_df.dropna(subset=['Date'])
-        history_df['Date'] = history_df['Date'].dt.date
-
-        st.subheader("Recent History")
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
+        # תיקון תאריכים
+        history_df['Date'] = pd.to_datetime(history_df['Date'], errors='coerce').dt.date
         
-        # כפתור גיבוי ידני
-        csv = history_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 הורד גיבוי היסטוריה (CSV)", data=csv, file_name=f"billing_backup_{date.today()}.csv", mime="text/csv")
+        # כרטיסיות סיכום (Metrics)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Companies", len(history_df['Company'].unique()))
+        m2.metric("Total Emails", int(history_df['Recipients'].sum()))
+        m3.metric("Last Sent", history_df['Date'].iloc[0].strftime("%d-%m-%Y"))
+
+        with st.expander("📊 View History & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter Company", options=sorted(history_df['Company'].unique().tolist()), placeholder="Choose...")
+            sel_date_range = f2.date_input("Date Range", value=[], help="Start & End dates")
+
+            filtered_df = history_df.copy()
+            if sel_comp:
+                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if len(sel_date_range) == 2:
+                start_date, end_date = sel_date_range
+                filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
+            
+            # הצגה בפורמט DD-MM-YYYY בטבלה
+            display_df = filtered_df.copy()
+            display_df['Date'] = display_df['Date'].apply(lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else "")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            if st.button("🗑️ Reset History"):
+                conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
+                st.rerun()
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
@@ -161,9 +205,17 @@ elif page == "Analytics Dashboard":
 
     if not df_raw.empty:
         df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        df_raw = df_raw.dropna(subset=['Date'])
         
-        # סיכום לפי חברה (פיבוט)
+        # חיפוש חופשי
+        st.subheader("🔍 Free Search & Timeline")
+        search_term = st.text_input("Search by Company Name", placeholder="Type here...")
+        if search_term:
+            results = df_raw[df_raw['Company'].str.contains(search_term, case=False)]
+            results_disp = results.copy()
+            results_disp['Date'] = results_disp['Date'].dt.strftime("%d-%m-%Y")
+            st.table(results_disp[['Date', 'Recipients', 'Files']])
+
+        # טבלת פיבוט
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({
             'Recipients': 'sum',
@@ -172,11 +224,5 @@ elif page == "Analytics Dashboard":
         }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date': 'Last Sent'}).reset_index()
         pivot['Last Sent'] = pivot['Last Sent'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
-        
-        # תרשים פעילות
-        st.subheader("📈 Monthly Activity")
-        df_raw['Month'] = df_raw['Date'].dt.strftime('%Y-%m')
-        monthly_counts = df_raw.groupby('Month').size()
-        st.bar_chart(monthly_counts)
     else:
-        st.info("אין נתונים היסטוריים להצגה בדשבורד.")
+        st.info("אין נתונים היסטוריים להצגה.")
