@@ -19,17 +19,17 @@ def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spong
 # --- Database Management (Silent Extension) ---
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
+    # יצירת טבלה עם כל העמודות הנדרשות
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
                    (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT,
                     Status TEXT DEFAULT 'Sent', Due_Date TEXT, Notes TEXT DEFAULT '')''')
     
-    # בדיקת עמודות חדשות למניעת פגיעה בקיים
+    # וידוא עמודות חדשות למקרה שהטבלה כבר קיימת
     cursor = conn.execute("PRAGMA table_info(history)")
     cols = [column[1] for column in cursor.fetchall()]
     if 'Status' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Status TEXT DEFAULT 'Sent'")
     if 'Due_Date' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Due_Date TEXT")
     if 'Notes' not in cols: conn.execute("ALTER TABLE history ADD COLUMN Notes TEXT DEFAULT ''")
-    
     conn.commit(); conn.close()
 
 def get_history_df():
@@ -43,13 +43,15 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (UNTOUCHED LOGIC & STYLE) ---
+# --- Page 1: Email Sender (RESTORED EXACT STYLE) ---
 if page == "Email Sender":
     st.markdown("""<style>
+    .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
+    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -76,6 +78,7 @@ if page == "Email Sender":
             file_names = [f.name.lower() for f in uploaded_files]
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
+            
             if orphans or missing:
                 confirm = st.toggle("🚨 I confirm all is correct", value=False)
                 allow_sending = confirm
@@ -83,6 +86,16 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    if orphans: 
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: 
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        st.warning(f"Missing files for: {', '.join(missing)}")
+                else:
+                    if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
+            else:
+                if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
         except: pass
 
     st.write("---")
@@ -92,7 +105,16 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords'.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if up_ex and uploaded_files and user_mail:
@@ -101,7 +123,7 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                # חישוב תאריך יעד אוטומטי ל-15 לחודש הנבחר
+                # חישוב תאריך יעד ל-15 לחודש
                 month_idx = months.index(sel_m) + 1
                 due_date_val = date(int(sel_y), month_idx, 15).strftime("%Y-%m-%d")
 
@@ -127,7 +149,7 @@ if page == "Email Sender":
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {company} - {current_period}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Hello,\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
+                        msg.attach(MIMEText(f"Hello {company},\nAttached are your billing files.\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
                         for f in company_files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -142,61 +164,73 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (UNTOUCHED) ---
+# --- Page 2: Analytics Dashboard (RESTORED EXACT STYLE) ---
 elif page == "Analytics Dashboard":
+    st.markdown("""<style>
+    [data-testid="stMetricValue"] { font-size: 18px !important; word-break: break-all !important; white-space: normal !important; }
+    </style>""", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+        c1, c2 = st.columns(2)
+        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
+        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
+        
+        f_df = df.copy()
+        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
+        if len(sel_date) == 2:
+            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
+
+        st.divider()
         m_col1, m_col2, m_col3 = st.columns(3)
         m_col1.metric("Last Sending Date", df['Date'].iloc[0])
         m_col2.metric("Last Sender", df['Sender'].iloc[0])
-        m_col3.metric("Total Overall Amount", f"${df['Amount'].sum():,.2f}")
+        curr = f_df['Currency'].iloc[0] if not f_df.empty else "$"
+        m_col3.metric("Total Amount Filtered", f"{curr}{f_df['Amount'].sum():,.2f}")
+
         st.divider()
-        st.write("**Quick History Log**")
-        st.dataframe(df[['Date', 'Company', 'Amount', 'Status']], use_container_width=True, hide_index=True)
+        p1, p2 = st.columns(2)
+        with p1:
+            st.write("**Pivot by Company**")
+            comp_res = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum', 'Recipients':'sum'}).reset_index()
+            comp_res['Amount'] = comp_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(comp_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
+        with p2:
+            st.write("**Pivot by Date**")
+            date_res = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum', 'Company':'count'}).reset_index()
+            date_res['Amount'] = date_res.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(date_res.drop(columns=['Currency']), use_container_width=True, hide_index=True)
+
+        with st.expander("📂 Full Filtered Log"):
+            log_df = f_df.copy()
+            log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
+            st.dataframe(log_df.drop(columns=['rowid', 'Date_obj', 'Currency', 'Due_Date', 'Status', 'Notes']), use_container_width=True, hide_index=True)
     else: st.info("No data recorded.")
 
-# --- Page 3: Collections Control (NEW PAGE) ---
+# --- Page 3: Collections Control (THE NEW ADDITION) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
-    
     if not df.empty:
         today = date.today()
-        
         for index, row in df.iterrows():
             due_date_obj = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
             is_overdue = due_date_obj and today > due_date_obj and row['Status'] != 'Paid'
             
-            # עיצוב שורה - אדום אם עבר הזמן ולא שולם
             bg_color = "#ffcccc" if is_overdue else "transparent"
-            
             with st.container():
                 cols = st.columns([1.5, 1.5, 1, 1.5, 2, 1])
-                
-                # עמודה 1: תאריך וחברה + אייקון אזהרה
                 warn_icon = "⚠️ " if is_overdue else ""
                 cols[0].markdown(f"**{warn_icon}{row['Company']}**")
                 cols[1].write(f"Due: {row['Due_Date']}")
-                
-                # עמודה 2: סכום
                 cols[2].write(f"{row['Currency']}{row['Amount']:,.2f}")
-                
-                # עמודה 3: סטטוס (Dropdown)
                 new_status = cols[3].selectbox("Status", ["Sent", "Paid", "In Dispute"], index=["Sent", "Paid", "In Dispute"].index(row['Status']), key=f"stat_{row['rowid']}")
-                
-                # עמודה 4: הערות (Text Input)
-                new_note = cols[4].text_input("Notes / Reference", value=row['Notes'], key=f"note_{row['rowid']}", placeholder="Add reference...")
-                
-                # עמודה 5: כפתור עדכון
+                new_note = cols[4].text_input("Notes", value=row['Notes'], key=f"note_{row['rowid']}")
                 if cols[5].button("Update", key=f"btn_{row['rowid']}"):
                     conn = sqlite3.connect('billing_history.db')
                     conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (new_status, new_note, row['rowid']))
                     conn.commit(); conn.close()
-                    st.success("Updated!")
-                    time.sleep(1); st.rerun()
-                
+                    st.success("Updated!"); time.sleep(1); st.rerun()
                 st.markdown(f"<hr style='margin:5px; border-top: 1px solid {bg_color};'>", unsafe_allow_html=True)
-    else:
-        st.info("No pending collections found.")
+    else: st.info("No records.")
