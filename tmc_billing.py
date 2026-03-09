@@ -4,7 +4,7 @@ import smtplib, time, sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime
+from datetime import datetime, date
 
 # הגדרות דף - TMC Billing & Analytics
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
@@ -40,7 +40,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- Page 1: Email Sender (Original Layout) ---
+# --- Page 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
@@ -100,7 +100,7 @@ if page == "Email Sender":
             else: st.session_state.sound_played = False
         except: pass
 
-    # 2. Sender Details (Original Detailed Instructions)
+    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -156,13 +156,15 @@ if page == "Email Sender":
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (Full English Layout) ---
+# --- Page 2: Analytics Dashboard (Calendar Fixed) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
 
     if not df_raw.empty:
-        # Simple Metrics
+        # חובה להפוך את התאריכים לאובייקט זמן בשביל ה-Calendar, אבל בצורה בטוחה
+        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], dayfirst=True, errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
@@ -170,27 +172,29 @@ elif page == "Analytics Dashboard":
 
         st.write("---")
 
-        # Pivot Summary
         st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({
-            'Recipients': 'sum', 
-            'Files': 'sum', 
-            'Date': 'max'
-        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date': 'Last Sent'}).reset_index()
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
+        pivot['Last Sent'] = pivot['Date_obj'].dt.strftime('%d/%m/%Y')
+        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Sent']], use_container_width=True, hide_index=True)
 
         st.write("---")
 
-        # Detailed Log with Filters
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            
+            # החזרת ה-Calendar (Date Input) בצורה בטוחה
+            sel_date_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
             
             filtered_df = df_raw.copy()
             if sel_comp:
                 filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
             
-            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
+                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
             
         if st.sidebar.button("🗑️ Reset All History"):
             conn = sqlite3.connect('billing_history.db')
