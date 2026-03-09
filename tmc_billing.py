@@ -20,11 +20,13 @@ def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spong
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
     conn.execute('''CREATE TABLE IF NOT EXISTS history 
-                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL)''')
+                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT)''')
     cursor = conn.execute("PRAGMA table_info(history)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'Amount' not in columns:
         conn.execute("ALTER TABLE history ADD COLUMN Amount REAL DEFAULT 0")
+    if 'Sender' not in columns:
+        conn.execute("ALTER TABLE history ADD COLUMN Sender TEXT DEFAULT 'Unknown'")
     conn.commit(); conn.close()
 
 def get_history_df():
@@ -38,7 +40,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- Page 1: Email Sender (ללא שינוי) ---
+# --- Page 1: Email Sender (ללא שינוי בכלל!) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
@@ -51,7 +53,6 @@ if page == "Email Sender":
 
     st.title("TMC Billing System")
 
-    # 1. Setup & Files
     st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
     with c1:
@@ -66,7 +67,6 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", accept_multiple_files=True)
 
-    # --- Detective Logic ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -95,7 +95,6 @@ if page == "Email Sender":
                 if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
         except: pass
 
-    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -105,8 +104,6 @@ if page == "Email Sender":
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
             To send emails via Gmail, you need a unique **App Password**.
-            *Standard login passwords will not work.*
-
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
             2. Make sure **2-Step Verification** is turned **ON**.
             3. Search for **'App passwords'** in the top search bar.
@@ -142,52 +139,74 @@ if page == "Email Sender":
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db')
-                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?)", 
-                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files), amt))
+                        conn.execute("INSERT INTO history VALUES (?,?,?,?,?,?)", 
+                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files), amt, user_mail))
                         conn.commit(); conn.close()
                         sent_count += 1
                 
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(4); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (עם קיפול ללוג) ---
+# --- Page 2: Analytics Dashboard (הפיבוטים הדינמיים) ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Billing Matrix & Tracking")
+    st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     
     if not df.empty:
-        st.subheader("🔍 Filter Records")
+        # פילטרים גלובליים
+        st.subheader("🔍 Filter & Analyze")
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Date_obj'])
         
         c1, c2 = st.columns(2)
         sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
-        sel_date = c2.date_input("Select Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
+        sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
 
-        filtered_df = df.copy()
+        # החלת פילטרים
+        f_df = df.copy()
         if sel_comp:
-            filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            f_df = f_df[f_df['Company'].isin(sel_comp)]
         if len(sel_date) == 2:
-            filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date[0]) & (filtered_df['Date_obj'].dt.date <= sel_date[1])]
+            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_date[0]) & (f_df['Date_obj'].dt.date <= sel_date[1])]
 
         st.divider()
 
-        # תצוגה מפורטת
-        st.subheader("💰 Billing per Invoice (Dynamic List)")
-        pivot_view = filtered_df[['Date', 'Company', 'Amount', 'Recipients']].copy()
-        pivot_view = pivot_view.rename(columns={'Recipients': 'Emails Sent', 'Amount': 'Billing Amount'})
-        st.dataframe(pivot_view.style.format({"Billing Amount": "${:,.2f}"}), use_container_width=True, hide_index=True)
+        # מדדים עליונים דינמיים
+        last_date = df['Date'].iloc[0] if not df.empty else "N/A"
+        last_sender = df['Sender'].iloc[0] if 'Sender' in df.columns else "N/A"
+        
+        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1.metric("Last Sending Date", last_date)
+        m_col2.metric("Last Sender Email", last_sender)
+        m_col3.metric("Total Amount (Filtered)", f"${f_df['Amount'].sum():,.2f}")
 
         st.divider()
-        col_sum1, col_sum2 = st.columns(2)
-        col_sum1.metric("Total Sum for Selected Filters", f"${filtered_df['Amount'].sum():,.2f}")
-        col_sum2.metric("Total Emails for Selected Filters", int(filtered_df['Recipients'].sum()))
 
-        # החזרת הקיפול (Expander) לתמונה שצירפת
-        with st.expander("📂 Full Filtered Log"):
-            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+        # פיבוטים דינמיים
+        st.subheader("📈 Summary Pivots")
+        p_col1, p_col2 = st.columns(2)
+        
+        with p_col1:
+            st.write("**Total by Company**")
+            # פיבוט דינמי לחברות
+            company_pivot = f_df.groupby('Company').agg({'Amount': 'sum', 'Recipients': 'sum'}).reset_index()
+            company_pivot.columns = ['Company', 'Total Amount ($)', 'Total Emails']
+            st.dataframe(company_pivot.style.format({"Total Amount ($)": "{:,.2f}"}), use_container_width=True, hide_index=True)
 
-        if st.sidebar.button("🗑️ Reset All History"):
+        with p_col2:
+            st.write("**Total by Date**")
+            # פיבוט דינמי לתאריכים
+            date_pivot = f_df.groupby('Date').agg({'Amount': 'sum', 'Company': 'count'}).reset_index()
+            date_pivot.columns = ['Date', 'Daily Total ($)', 'Total Clients']
+            st.dataframe(date_pivot.style.format({"Daily Total ($)": "{:,.2f}"}), use_container_width=True, hide_index=True)
+
+        st.divider()
+
+        # ההיסטוריה המלאה והמתקפלת
+        with st.expander("📂 Full Filtered Log (Detailed History)"):
+            st.dataframe(f_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+
+        if st.sidebar.button("🗑️ Reset Database"):
             conn = sqlite3.connect('billing_history.db'); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
     else:
-        st.info("No billing data yet.")
+        st.info("No data available yet.")
