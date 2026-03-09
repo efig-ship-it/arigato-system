@@ -6,22 +6,26 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף
+# הגדרות דף - TMC Billing & Analytics
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- פונקציות עזר (צליל מחיאות כפיים המקורי) ---
+# --- פונקציות עזר (צליל מחיאות כפיים) ---
 def play_applause_sound():
-    # זה הקוד המדויק שבו השתמשנו בעבר להפעלת הסאונד
-    sound_html = """
-    <audio autoplay>
-    <source src="https://github.com/robiningelbrecht/strava-activities/raw/master/files/applause.mp3" type="audio/mpeg">
-    </audio>
-    """
-    st.markdown(sound_html, unsafe_allow_html=True)
+    # שימוש בקישור ישיר ואמין למחיאות כפיים
+    audio_url = "https://www.soundjay.com/human/sounds/applause-01.mp3"
+    # הצגת נגן נסתר שמנגן אוטומטית
+    st.components.v1.html(
+        f"""
+        <audio autoplay>
+            <source src="{audio_url}" type="audio/mpeg">
+        </audio>
+        """,
+        height=0,
+    )
 
-# --- ניהול בסיס נתונים ---
+# --- ניהול בסיס נתונים (שמירה לצמיתות בקובץ) ---
 def init_db():
-    conn = sqlite3.connect('billing_history.db')
+    conn = sqlite3.connect('billing_history.db') # הקובץ הזה נשמר על הדיסק
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS history 
                  (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)''')
@@ -43,18 +47,8 @@ if page == "Email Sender":
         .stVerticalBlock { gap: 0.4rem; }
         hr { margin: 0.5em 0px; }
         .stMetric { background-color: #f8f9fb; padding: 5px; border-radius: 8px; border: 1px solid #eee; }
-        
-        .due-date-container {
-            display: flex;
-            justify-content: center;
-            width: 100%;
-            margin-bottom: 2px;
-        }
-        .due-date-label {
-            font-size: 14px;
-            font-weight: 500;
-            color: #31333F;
-        }
+        .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
+        .due-date-label { font-size: 14px; font-weight: 500; color: #31333F; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -76,13 +70,12 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # חלק 2: פרטי שולח (עם הפירוט המלא של ה-App Password)
+    # חלק 2: פרטי שולח (הפירוט המלא נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
     user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
     user_pass = sc2.text_input("App Password", type="password")
-    
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
             st.markdown("""
@@ -111,7 +104,6 @@ if page == "Email Sender":
         except: pass
         finally: conn.close()
 
-    # לוגיקה לשליחה
     if st.button("🚀 Start Bulk Sending", use_container_width=True):
         if up_ex and uploaded_files and user_mail:
             try:
@@ -147,17 +139,14 @@ if page == "Email Sender":
                 
                 server.quit()
                 st.balloons()
-                play_applause_sound() # הפעלת הסאונד המקורי
-                st.success(f"השליחה הסתיימה! {sent_count} מיילים נשלחו.")
+                play_applause_sound() # קריאה לפונקציית הסאונד
+                st.success(f"Sent {sent_count} emails successfully!")
                 time.sleep(2)
                 st.rerun()
-                
             except Exception as e:
-                st.error(f"שגיאה בשליחה: {e}")
-        else:
-            st.error("Missing fields or files!")
+                st.error(f"Error: {e}")
 
-    # חלק 3: היסטוריה
+    # חלק 3: היסטוריה (נשמרת תמיד!)
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
@@ -176,8 +165,7 @@ if page == "Email Sender":
             sel_date_range = f2.date_input("Date Range", value=[], help="Start & End dates")
 
             filtered_df = history_df.copy()
-            if sel_comp:
-                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
             if len(sel_date_range) == 2:
                 start_date, end_date = sel_date_range
                 filtered_df = filtered_df[(filtered_df['Date'] >= start_date) & (filtered_df['Date'] <= end_date)]
@@ -189,27 +177,15 @@ if page == "Email Sender":
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics & Reports")
-    
     conn = sqlite3.connect('billing_history.db')
     df_raw = pd.read_sql_query("SELECT * FROM history", conn)
     conn.close()
 
     if not df_raw.empty:
         df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        
-        # חיפוש חופשי
-        st.subheader("🔍 Free Search & Timeline")
-        search_term = st.text_input("Search by Company Name", placeholder="Type here...")
-        if search_term:
-            results = df_raw[df_raw['Company'].str.contains(search_term, case=False)]
-            results_disp = results.copy()
-            results_disp['Date'] = results_disp['Date'].dt.strftime("%d-%m-%Y")
-            st.table(results_disp[['Date', 'Recipients', 'Files']])
-
-        # טבלת פיבוט
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
         pivot['Date'] = pivot['Date'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot, use_container_width=True, hide_index=True)
     else:
-        st.info("אין נתונים היסטוריים להצגה.")
+        st.info("No data recorded yet.")
