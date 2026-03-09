@@ -6,15 +6,15 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף
+# הגדרות דף - TMC Billing & Analytics
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- מערכת סאונד מעודכנת עם הקישורים שלך ---
+# --- מערכת סאונד עם הבחירות שלך ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play().catch(function(error) {{ console.log("Blocked by browser"); }});
+            audio.play();
         </script>
     """, height=0)
 
@@ -23,7 +23,7 @@ def sound_success():
     play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 
 def sound_detective():
-    # Spongebob Sad Song (לבלש רגיל והפוך)
+    # Spongebob Sad Song (כינור עצוב - טא טא טאאאא)
     play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- ניהול בסיס נתונים ---
@@ -51,9 +51,9 @@ if page == "Email Sender":
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; }
-    .big-detective { font-size: 80px; text-align: center; margin-bottom: 0px; }
-    .detective-header { font-size: 40px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
-    .reverse-detective-header { font-size: 40px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-top: 0px; }
+    .big-detective { font-size: 90px; text-align: center; margin-bottom: 0px; }
+    .detective-header { font-size: 45px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; }
+    .reverse-detective-header { font-size: 45px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -73,7 +73,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון הבלשים ---
+    # --- הבלשים המשודרגים ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -85,12 +85,12 @@ if page == "Email Sender":
             missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
             if orphans or missing_files:
-                sound_detective() # השמעת השיר העצוב של בובספוג
+                sound_detective() # השמעת השיר העצוב
                 
                 if orphans:
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                    st.error(f"Files with no matching company in Excel: {', '.join(orphans)}")
+                    st.error(f"Unrecognized files (no company in Excel): {', '.join(orphans)}")
 
                 if missing_files:
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
@@ -99,9 +99,9 @@ if page == "Email Sender":
                         st.warning(f"⚠️ {comp} appears in the mailing list, but no file was found for it!")
 
                 with st.info("🚨 **Safety Verification Required**"):
-                    allow_sending = st.toggle("I confirm that data is correct and I want to proceed with sending", value=False)
-        except Exception:
-            st.error("Critical error in file validation!")
+                    allow_sending = st.toggle("I confirm that data is correct and I want to proceed", value=False)
+        except Exception as e:
+            st.error(f"Validation Error: {e}")
 
     # 2. Sender Details (הפירוט המלא נשמר)
     st.write("---")
@@ -115,7 +115,7 @@ if page == "Email Sender":
             1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
             2. Make sure **2-Step Verification** is turned **ON**.
             3. Search for **'App passwords'**.
-            4. Create a name and copy the **16-character code**.
+            4. Copy the **16-character code**.
             """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
@@ -147,33 +147,32 @@ if page == "Email Sender":
                         conn.commit(); conn.close()
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
-                server.quit(); st.balloons(); sound_success() # טרמפט הצלחה
+                server.quit(); st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
+            except Exception as e:
+                st.error(f"Sending failed: {e}")
+        else:
+            st.error("Please fill in all details and upload files.")
 
-# --- עמוד 2: Analytics Dashboard ---
+# --- עמוד 2: Analytics Dashboard (תיקון ה-ValueError) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
+        # פתרון ValueError: המרה בטוחה של תאריכים
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Companies", len(df_raw['Company'].unique()))
-        m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
+        m1.metric("Companies", len(df_raw['Company'].unique()))
+        m2.metric("Total Emails", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date_obj'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date_obj'].max()) else "N/A")
 
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
         pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%Y-%m-%d")
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
 
-        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
-            f1, f2 = st.columns([1.5, 1])
-            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
-            sel_date_range = f2.date_input("Filter by Date Range", value=[])
-            filtered_df = df_raw.copy()
-            if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-            if len(sel_date_range) == 2:
-                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
-            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-    else: st.info("No data yet.")
+        with st.expander("📂 Detailed Log & Filters", expanded=True):
+            st.dataframe(df_raw.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+    else:
+        st.info("No history found.")
