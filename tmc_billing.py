@@ -32,7 +32,8 @@ def init_db():
 def get_history_df():
     conn = sqlite3.connect('billing_history.db')
     df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
-    conn.close(); return df
+    conn.close()
+    return df
 
 init_db()
 
@@ -67,28 +68,24 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload Invoices", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
-    # --- מנגנון הבלשים ---
+    # מנגנון הבלשים
     allow_sending = True
     if up_ex and uploaded_files:
         try:
             df_ex = pd.read_excel(up_ex)
             excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
             file_names = [f.name.lower() for f in uploaded_files]
-            
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
             missing_files = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
 
             if orphans or missing_files:
                 if 'alert_played' not in st.session_state:
-                    sound_detective()
-                    st.session_state.alert_played = True
+                    sound_detective(); st.session_state.alert_played = True
                 
-                # תיבת האישור תמיד מופיעה אם יש בעיה
                 with st.info("🚨 **Action Required: Data Validation**"):
                     confirm = st.toggle("I confirm that data is correct and I want to proceed", value=False)
                     allow_sending = confirm
 
-                # ההודעות והבלש נעלמים ברגע האישור
                 if not confirm:
                     if orphans:
                         st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
@@ -99,11 +96,10 @@ if page == "Email Sender":
                         st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
                         for comp in missing_files:
                             st.warning(f"⚠️ {comp} appears in the list, but no file was found!")
-            else:
-                st.session_state.alert_played = False
+            else: st.session_state.alert_played = False
         except: pass
 
-    # 2. Sender Details (הפירוט המלא חזר)
+    # 2. Sender Details (הפירוט המלא נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -146,6 +142,7 @@ if page == "Email Sender":
                             msg.attach(part)
                         server.send_message(msg)
                         conn = sqlite3.connect('billing_history.db')
+                        # שמירת תאריך בפורמט פשוט ללא סלשים כדי למנוע שגיאות
                         conn.cursor().execute("INSERT INTO history VALUES (?, ?, ?, ?)", 
                                            (datetime.now().strftime("%Y-%m-%d"), company, len(emails), len(files)))
                         conn.commit(); conn.close()
@@ -153,14 +150,15 @@ if page == "Email Sender":
                     prog.progress((i + 1) / len(df))
                 server.quit(); st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
-            except Exception as e: st.error(f"Error: {e}")
+            except Exception as e:
+                st.error(f"Error detail: {str(e)}") # עכשיו תראה מה השגיאה באמת
 
 # --- עמוד 2: Analytics Dashboard (תיקון הקריסה) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
-        # פתרון קבוע לשגיאת ה-KeyError והתאריכים
+        # טיפול חכם בתאריכים למניעת ה-ValueError
         df_raw['Date'] = pd.to_datetime(df_raw['Date'], errors='coerce')
         
         m1, m2, m3 = st.columns(3)
@@ -169,7 +167,6 @@ elif page == "Analytics Dashboard":
         m3.metric("Last Sent", df_raw['Date'].max().strftime("%Y-%m-%d") if pd.notnull(df_raw['Date'].max()) else "N/A")
 
         st.subheader("🏢 Company Summary")
-        # פיבוט פשוט ללא שינויי שמות שגורמים לשגיאות
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date': 'max'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
 
@@ -177,13 +174,14 @@ elif page == "Analytics Dashboard":
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter Company", options=sorted(df_raw['Company'].unique().tolist()))
             sel_date = f2.date_input("Date Range", value=[])
-            
             f_df = df_raw.copy()
             if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
             if len(sel_date) == 2:
                 f_df = f_df[(f_df['Date'].dt.date >= sel_date[0]) & (f_df['Date'].dt.date <= sel_date[1])]
-            
-            # הצגת תאריכים כמו שהם נשמרו (YYYY-MM-DD)
             st.dataframe(f_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No data recorded yet.")
+            
+        if st.sidebar.button("🗑️ Reset All History"):
+            conn = sqlite3.connect('billing_history.db')
+            conn.cursor().execute("DELETE FROM history")
+            conn.commit(); conn.close(); st.rerun()
+    else: st.info("No data recorded yet.")
