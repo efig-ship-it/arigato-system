@@ -9,24 +9,20 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Hardcore Fix) ---
+# --- Audio System (Power Fix) ---
 def play_audio(url):
-    # שימוש ב-iframe נסתר כדי למנוע קטיעה בזמן רענון הדף
     st.components.v1.html(f"""
         <script>
-            window.parent.document.querySelectorAll('audio').forEach(el => el.remove());
             var audio = new Audio("{url}");
-            audio.autoplay = true;
-            audio.play();
+            audio.preload = "auto";
+            audio.load();
+            audio.currentTime = 0;
+            audio.play().catch(function(e) {{ console.log("Playback error:", e); }});
         </script>
     """, height=0)
 
-def sound_success(): 
-    play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
-
-def sound_detective(): 
-    # לינק חלופי ומהיר יותר לכינור של בובספוג
-    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
+def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
+def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
 # --- Database ---
 def init_db():
@@ -47,25 +43,15 @@ page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
 # --- Page 1: Email Sender ---
 if page == "Email Sender":
-    # CSS לבלש שמשתלט על כל המסך
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     
-    /* הבלש שמשתלט על המסך */
-    .giant-overlay {
-        position: fixed;
-        top: 0; left: 0;
-        width: 100vw; height: 100vh;
-        background-color: rgba(255,255,255,0.8);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 9999;
-        font-size: 600px;
-        pointer-events: none;
-    }
+    /* הגדרות הבלש המוגדל */
+    .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
+    .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
+    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -85,7 +71,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", accept_multiple_files=True)
 
-    # --- Detective Logic ---
+    # Detective Logic
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -97,19 +83,18 @@ if page == "Email Sender":
             
             if orphans or missing:
                 if 'sound_played' not in st.session_state:
-                    sound_detective()
-                    st.session_state.sound_played = True
-                
-                # הבלש הענק משתלט על המסך
-                st.markdown('<div class="giant-overlay">🕵️‍♂️</div>', unsafe_allow_html=True)
-                
+                    sound_detective(); st.session_state.sound_played = True
                 with st.info("🚨 **Action Required: Data Validation**"):
                     confirm = st.toggle("I confirm that data is correct", value=False)
                     allow_sending = confirm
-                
                 if not confirm:
-                    if orphans: st.error(f"Detective Alert! Unrecognized files: {', '.join(orphans)}")
-                    if missing: st.warning(f"Reverse Detective! Missing files for: {', '.join(missing)}")
+                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    if orphans: 
+                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                        st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: 
+                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                        st.warning(f"Missing files for: {', '.join(missing)}")
             else:
                 st.session_state.sound_played = False
         except: pass
@@ -122,7 +107,11 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
+            st.markdown("""
+            1. [Google Security](https://myaccount.google.com/security)
+            2. Enable 2-Step Verification.
+            3. Search 'App passwords' and create one.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
@@ -158,15 +147,13 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 
-                server.quit()
-                sound_success()
-                st.balloons()
+                server.quit(); sound_success(); st.balloons()
                 st.success(f"Done! {sent_count} emails sent.")
-                time.sleep(3); st.rerun()
+                time.sleep(2); st.rerun()
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics Dashboard ---
+# --- Page 2: Analytics ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -176,16 +163,13 @@ elif page == "Analytics Dashboard":
         m1.metric("Companies", len(df_raw['Company'].unique()))
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
-        
         st.write("---")
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
             sel_range = f2.date_input("Filter by Date Range", value=[])
-            
             filtered_df = df_raw.copy()
             if sel_comp: filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
             if len(sel_range) == 2:
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
             st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-    else: st.info("No data yet.")
