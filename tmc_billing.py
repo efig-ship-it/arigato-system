@@ -35,14 +35,13 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (UNTOUCHED) ---
+# --- Page 1: Email Sender (Untouched) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -127,15 +126,17 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (UNTOUCHED PIVOTS) ---
+# --- Page 2: Analytics Dashboard (WITH CORRECT SUMS) ---
 elif page == "Analytics Dashboard":
     st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
+        # סכימה מדויקת לפי הסטטוס שנשמר ב-DB
         total_billed = df['Amount'].sum()
         total_collected = df[df['Status'] == 'Paid']['Amount'].sum()
         total_outstanding = total_billed - total_collected
+        
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Billed", f"${total_billed:,.2f}")
         m2.metric("Total Collected", f"${total_collected:,.2f}")
@@ -153,53 +154,49 @@ elif page == "Analytics Dashboard":
             res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        with st.expander("📂 Full History Log", expanded=True):
-            log_df = df.copy()
-            log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
-            st.dataframe(log_df[['Date', 'Company', 'Amount', 'Status', 'Sender']], use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- Page 3: Collections Control (SINGLE TABLE + AUTO COLOR) ---
+# --- Page 3: Collections Control (DYNAMIC RE-COLORING) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
     if not df.empty:
         today = date.today()
-        # לוגיקת חריגה אוטומטית לתצוגה
-        def apply_overdue_logic(row):
+        
+        # חישוב חריגות לפני הצביעה
+        def get_display_status(row):
             due = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
             if row['Status'] != 'Paid' and due and today > due: return 'Overdue'
             return row['Status']
         
-        df['Status'] = df.apply(apply_overdue_logic, axis=1)
+        df['Display_Status'] = df.apply(get_display_status, axis=1)
 
-        # פונקציית צביעת סטטוס בלבד
         def color_status(val):
             if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
             if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;'
             return ''
 
-        st.write("Edit **Status** or **Notes** (Double-click to type). Colors apply after **Save**.")
+        st.write("בצע שינוי ל-**Paid** ולחץ על **Save All Changes** כדי לעדכן את הדשבורד.")
         
-        # טבלה אחת לעריכה עם צביעה מובנית
         edited_df = st.data_editor(
-            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']].style.map(color_status, subset=['Status']),
+            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']].style.map(color_status, subset=['Display_Status']),
             column_config={
                 "rowid": None,
-                "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
+                "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
                 "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
-            hide_index=True, use_container_width=True, key="col_editor_v5"
+            hide_index=True, use_container_width=True, key="col_editor_v6"
         )
         
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                # שומרים כ-Sent אם זה Overdue כדי שהלוגיקה תמשיך לבדוק אוטומטית
-                save_status = 'Sent' if row['Status'] == 'Overdue' else row['Status']
-                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (save_status, str(row['Notes']), row['rowid']))
+                # שמירת הסטטוס המקורי (Overdue הופך חזרה ל-Sent ב-DB כדי שהלוגיקה תמשיך לרוץ)
+                db_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
+                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", 
+                             (db_status, str(row['Notes']), row['rowid']))
             conn.commit(); conn.close()
-            st.success("Changes Saved!"); time.sleep(1); st.rerun()
+            st.success("Saved! Updating Dashboard..."); time.sleep(1); st.rerun()
     else: st.info("No records.")
