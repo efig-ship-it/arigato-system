@@ -40,7 +40,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- Page 1: Email Sender (ללא שינוי בכלל!) ---
+# --- Page 1: Email Sender (ללא שינוי עיצובי!) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
@@ -117,6 +117,10 @@ if page == "Email Sender":
         if up_ex and uploaded_files and user_mail:
             try:
                 df = pd.read_excel(up_ex).dropna(how='all')
+                
+                # מציאת עמודת הסכום בצורה חסינה (לא משנה אם אותיות קטנות או גדולות)
+                amt_col = next((c for c in df.columns if str(c).lower() == 'amount'), None)
+                
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
@@ -125,7 +129,12 @@ if page == "Email Sender":
                     company = str(row.iloc[0]).strip()
                     emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                     files = [f for f in uploaded_files if company.lower() in f.name.lower()]
-                    amt = float(re.sub(r'[^\d.]', '', str(row.get('Amount', 0)))) if 'Amount' in row else 0.0
+                    
+                    # שליפת סכום
+                    amt = 0.0
+                    if amt_col:
+                        amt_raw = str(row[amt_col])
+                        amt = float(re.sub(r'[^\d.]', '', amt_raw)) if any(c.isdigit() for c in amt_raw) else 0.0
                     
                     if emails and files:
                         msg = MIMEMultipart()
@@ -147,13 +156,12 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(4); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (הפיבוטים הדינמיים) ---
+# --- Page 2: Analytics Dashboard (פיבוטים דינמיים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     
     if not df.empty:
-        # פילטרים גלובליים
         st.subheader("🔍 Filter & Analyze")
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Date_obj'])
@@ -162,7 +170,6 @@ elif page == "Analytics Dashboard":
         sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
         sel_date = c2.date_input("Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
 
-        # החלת פילטרים
         f_df = df.copy()
         if sel_comp:
             f_df = f_df[f_df['Company'].isin(sel_comp)]
@@ -171,7 +178,7 @@ elif page == "Analytics Dashboard":
 
         st.divider()
 
-        # מדדים עליונים דינמיים
+        # מדדים עליונים
         last_date = df['Date'].iloc[0] if not df.empty else "N/A"
         last_sender = df['Sender'].iloc[0] if 'Sender' in df.columns else "N/A"
         
@@ -188,21 +195,18 @@ elif page == "Analytics Dashboard":
         
         with p_col1:
             st.write("**Total by Company**")
-            # פיבוט דינמי לחברות
             company_pivot = f_df.groupby('Company').agg({'Amount': 'sum', 'Recipients': 'sum'}).reset_index()
             company_pivot.columns = ['Company', 'Total Amount ($)', 'Total Emails']
             st.dataframe(company_pivot.style.format({"Total Amount ($)": "{:,.2f}"}), use_container_width=True, hide_index=True)
 
         with p_col2:
             st.write("**Total by Date**")
-            # פיבוט דינמי לתאריכים
             date_pivot = f_df.groupby('Date').agg({'Amount': 'sum', 'Company': 'count'}).reset_index()
             date_pivot.columns = ['Date', 'Daily Total ($)', 'Total Clients']
             st.dataframe(date_pivot.style.format({"Daily Total ($)": "{:,.2f}"}), use_container_width=True, hide_index=True)
 
         st.divider()
 
-        # ההיסטוריה המלאה והמתקפלת
         with st.expander("📂 Full Filtered Log (Detailed History)"):
             st.dataframe(f_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
 
