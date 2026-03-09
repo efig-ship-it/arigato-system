@@ -71,15 +71,25 @@ if page == "Email Sender":
                 st.error(f"🕵️‍♂️ **עצור!** מצאתי קבצים שלא משויכים לאף חברה באקסל: `{', '.join(orphaned)}`")
         except: pass
 
-    # חלק 2: פרטי שולח
+    # חלק 2: פרטי שולח (הפירוט המלא שהבטחתי לא לשנות)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
     user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
     user_pass = sc2.text_input("App Password", type="password")
+    
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. Go to [Google Security](https://myaccount.google.com/security)\n2. 2-Step Auth: **ON**\n3. Search **'App passwords'**\n4. Copy the **16-char code**.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_month_year}")
 
@@ -100,7 +110,7 @@ if page == "Email Sender":
                     if files and emails:
                         msg = MIMEMultipart()
                         msg['From'], msg['To'], msg['Subject'] = user_mail, ", ".join(emails), f"{user_subj} - {company}"
-                        msg.attach(MIMEText(f"Attached are files for {company}.\nDue: {current_month_year}", 'plain'))
+                        msg.attach(MIMEText(f"Hi,\n\nAttached are files for {company}.\nDue: {current_month_year}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -120,20 +130,18 @@ if page == "Email Sender":
                 time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-    # חלק 3: היסטוריה - תצוגה מתוקנת למניעת שגיאה
+    # חלק 3: היסטוריה
     st.write("---")
     conn = sqlite3.connect('billing_history.db')
     history_df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
     conn.close()
 
     if not history_df.empty:
-        # פתרון השגיאה: המרה בטוחה של תאריכים
         history_df['Date_obj'] = pd.to_datetime(history_df['Date'], errors='coerce')
         
         m1, m2, m3 = st.columns(3)
         m1.metric("Companies", len(history_df['Company'].unique()))
         m2.metric("Total Emails", int(history_df['Recipients'].sum()))
-        # הצגת תאריך אחרון בפורמט DD/MM/YYYY
         last_date = history_df['Date_obj'].max()
         m3.metric("Last Sent", last_date.strftime("%d/%m/%Y") if pd.notnull(last_date) else "N/A")
 
@@ -148,14 +156,9 @@ if page == "Email Sender":
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
                                           (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
             
-            # הצגת הטבלה בפורמט DD-MM-YYYY
             display_df = filtered_df.drop(columns=['Date_obj']).copy()
             display_df['Date'] = pd.to_datetime(display_df['Date'], errors='coerce').dt.strftime("%d-%m-%Y")
             st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            if st.button("🗑️ Reset History"):
-                conn = sqlite3.connect('billing_history.db'); conn.cursor().execute("DELETE FROM history"); conn.commit(); conn.close()
-                st.rerun()
 
 # --- עמוד 2: Analytics Dashboard ---
 elif page == "Analytics Dashboard":
@@ -165,9 +168,7 @@ elif page == "Analytics Dashboard":
     
     if not df_raw.empty:
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
-        
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum', 'Date_obj': 'max'}).reset_index()
         pivot['Last Activity'] = pivot['Date_obj'].dt.strftime("%d-%m-%Y")
         st.dataframe(pivot[['Company', 'Recipients', 'Files', 'Last Activity']], use_container_width=True, hide_index=True)
-    else: st.info("No data yet.")
