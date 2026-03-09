@@ -6,15 +6,15 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
 
-# הגדרות דף
+# הגדרות דף - TMC Billing & Analytics
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- מערכת סאונד משודרגת ---
+# --- מערכת סאונד משודרגת (הפעלה דרך JavaScript) ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play();
+            audio.play().catch(function(error) {{ console.log("Blocked by browser"); }});
         </script>
     """, height=0)
 
@@ -25,7 +25,6 @@ def sound_detective():
     play_audio("https://www.soundjay.com/buttons/sounds/button-4.mp3")
 
 def sound_error():
-    # צליל Waa Waa Waa (Sad Trombone)
     play_audio("https://www.myinstants.com/media/sounds/mario-dies.mp3")
 
 # --- ניהול בסיס נתונים ---
@@ -37,29 +36,26 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_history_df():
+    conn = sqlite3.connect('billing_history.db')
+    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
+    conn.close()
+    return df
+
 init_db()
 
-# תפריט ניווט
+# תפריט ניווט בצד
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
+# --- עמוד 1: Email Sender ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
     .due-date-container { display: flex; justify-content: center; width: 100%; margin-bottom: 2px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; }
-    
-    /* עיצוב הבלש הגדול */
     .big-detective { font-size: 80px; text-align: center; margin-bottom: 0px; }
-    .detective-header { 
-        font-size: 40px; 
-        font-weight: 900; 
-        color: #d32f2f; 
-        text-align: center; 
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        margin-top: 0px;
-    }
+    .detective-header { font-size: 40px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-top: 0px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -77,7 +73,7 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", [str(y) for y in range(2025, 2030)], index=1, label_visibility="collapsed")
         current_month_year = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload all Invoices & Reports", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True)
 
     # מנגנון הבלש 🕵️‍♂️
     allow_sending = True
@@ -91,15 +87,14 @@ if page == "Email Sender":
                 st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                 st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
                 st.error(f"Unrecognized files: {', '.join(orphans)}")
-                sound_detective() # צליל בלש
-                
-                with st.info("🚨 Action Required"):
+                sound_detective()
+                with st.info("💡 **Safety Verification Required**"):
                     allow_sending = st.toggle("I have reviewed the alerts and confirm the data is correct", value=False)
         except Exception:
             sound_error()
             st.error("Error processing files.")
 
-    # 2. Sender Details (פירוט ה-App Password המקורי)
+    # 2. Sender Details (הפירוט המלא והמקורי נשמר)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -149,22 +144,67 @@ if page == "Email Sender":
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
                 server.quit()
-                st.balloons()
-                sound_success() # מחיאות כפיים
+                st.balloons(); sound_success()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(2); st.rerun()
             except Exception as e:
-                sound_error() # צליל שגיאה
-                st.error(f"Error: {e}")
+                sound_error(); st.error(f"Error: {e}")
 
-# --- עמוד 2: Analytics Dashboard ---
+# --- עמוד 2: Analytics Dashboard (הוחזרו הפיבוטים, הפילטרים והקיפול) ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Analytics Dashboard")
-    conn = sqlite3.connect('billing_history.db')
-    df = pd.read_sql_query("SELECT * FROM history ORDER BY rowid DESC", conn)
-    conn.close()
+    st.title("📊 Data Analytics Dashboard")
+    df_raw = get_history_df()
 
-    if not df.empty:
-        st.metric("Total Emails Sent", int(df['Recipients'].sum()))
+    if not df_raw.empty:
+        # פתרון ValueError: המרה בטוחה של תאריכים
+        df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], errors='coerce')
+        
+        # 1. Metrics (תצוגה עליונה)
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Companies", len(df_raw['Company'].unique()))
+        m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
+        last_date = df_raw['Date_obj'].max()
+        m3.metric("Last Activity", last_date.strftime("%Y-%m-%d") if pd.notnull(last_date) else "N/A")
+
         st.write("---")
-        with st.expander("📂 View Activity Log", expanded=True):
-            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # 2. הפיבוט המרכזי - סיכום לפי חברה
+        st.subheader("🏢 Company Pivot Summary")
+        pivot = df_raw.groupby('Company').agg({
+            'Recipients': 'sum', 
+            'Files': 'sum', 
+            'Date_obj': 'max'
+        }).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files', 'Date_obj': 'Last Activity'}).reset_index()
+        pivot['Last Activity'] = pivot['Last Activity'].dt.strftime("%Y-%m-%d")
+        st.dataframe(pivot, use_container_width=True, hide_index=True)
+
+        st.write("---")
+
+        # 3. לוג פעילות מפורט עם פילטרים בתוך Expander (ניתן לקיפול)
+        with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
+            f1, f2 = st.columns([1.5, 1])
+            sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
+            sel_date_range = f2.date_input("Filter by Date Range (Calendar)", value=[])
+
+            filtered_df = df_raw.copy()
+            
+            # החלת פילטר חברה
+            if sel_comp:
+                filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
+            
+            # החלת פילטר תאריכים
+            if len(sel_date_range) == 2:
+                filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date_range[0]) & 
+                                          (filtered_df['Date_obj'].dt.date <= sel_date_range[1])]
+            
+            # הצגת הטבלה המפורטת
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+
+        # כפתור איפוס היסטוריה (אופציונלי)
+        if st.sidebar.button("🗑️ Reset All History"):
+            conn = sqlite3.connect('billing_history.db')
+            conn.cursor().execute("DELETE FROM history")
+            conn.commit(); conn.close()
+            st.rerun()
+
+    else:
+        st.info("No data recorded yet. Send some emails to see analytics!")
