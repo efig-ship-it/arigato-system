@@ -9,15 +9,14 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Final Fix) ---
+# --- Audio System (Fixed with Direct Link) ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
             audio.preload = "auto";
             audio.play().catch(function(e) {{
-                console.log("Autoplay blocked, waiting for interaction");
-                // ניסיון השמעה נוסף בלחיצה כלשהי על המסך
+                console.log("Autoplay blocked. Click anywhere to play.");
                 document.addEventListener('click', function() {{
                     audio.play();
                 }}, {{once: true}});
@@ -29,7 +28,8 @@ def sound_success():
     play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 
 def sound_detective(): 
-    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
+    # הלינק הישיר לקובץ ה-MP3 מהדף ששלחת
+    play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
 
 # --- Database ---
 def init_db():
@@ -75,7 +75,7 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload all Invoices & Reports", accept_multiple_files=True)
 
-    # Detective Logic
+    # --- Detective Logic ---
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -89,9 +89,11 @@ if page == "Email Sender":
                 if 'sound_played' not in st.session_state:
                     sound_detective()
                     st.session_state.sound_played = True
+                
                 with st.info("🚨 **Action Required: Data Validation**"):
                     confirm = st.toggle("I confirm that data is correct", value=False)
                     allow_sending = confirm
+                
                 if not confirm:
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     if orphans: 
@@ -161,12 +163,11 @@ if page == "Email Sender":
                 sound_success()
                 st.balloons()
                 st.success(f"Done! {sent_count} emails sent.")
-                time.sleep(4)
-                st.rerun()
+                time.sleep(4); st.rerun()
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
 
-# --- Page 2: Analytics (הפיבוט חזר!) ---
+# --- Page 2: Analytics Dashboard (Pivot + Calendar) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Data Analytics Dashboard")
     df_raw = get_history_df()
@@ -178,7 +179,7 @@ elif page == "Analytics Dashboard":
         m3.metric("Last Activity", df_raw['Date'].iloc[0])
         
         st.write("---")
-        # טבלת פיבוט - סיכום לפי חברה
+        # טבלת פיבוט חזרה!
         st.subheader("🏢 Company Pivot Summary")
         pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
         st.dataframe(pivot, use_container_width=True, hide_index=True)
@@ -193,5 +194,4 @@ elif page == "Analytics Dashboard":
             if len(sel_range) == 2:
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
             st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-    else:
-        st.info("No data yet.")
+    else: st.info("No data recorded yet.")
