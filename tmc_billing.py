@@ -9,12 +9,18 @@ from datetime import datetime, date
 # --- Page Config ---
 st.set_page_config(page_title="TMC Billing & Analytics", layout="centered")
 
-# --- Audio System (Triggered by Interaction) ---
+# --- Audio System (Auto-Trigger Logic) ---
 def play_audio(url):
     st.components.v1.html(f"""
         <script>
             var audio = new Audio("{url}");
-            audio.play().catch(function(e) {{ console.log("Blocked by browser"); }});
+            audio.autoplay = true;
+            audio.play().catch(function(e) {{
+                console.log("Autoplay blocked. It will play on next click.");
+                window.addEventListener('click', function() {{
+                    audio.play();
+                }}, {{once: true}});
+            }});
         </script>
     """, height=0)
 
@@ -79,25 +85,25 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                # כפתור שמפעיל את הסאונד ומאשר את התצוגה
-                if st.button("🔍 CLICK TO INVESTIGATE ERRORS (Plays Sound)", use_container_width=True):
+                # השמעת סאונד אוטומטית ברגע שהתנאי מתקיים
+                if 'detective_triggered' not in st.session_state:
                     sound_detective()
-                    st.session_state.show_detective = True
+                    st.session_state.detective_triggered = True
                 
-                if st.session_state.get('show_detective', False):
-                    st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: 
-                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                        st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: 
-                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing files for: {', '.join(missing)}")
-                    
-                    st.write("---")
-                    confirm = st.toggle("I confirm all is correct and I am ready to send", value=False)
-                    allow_sending = confirm
+                st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                if orphans: 
+                    st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
+                    st.error(f"Unrecognized files: {', '.join(orphans)}")
+                if missing: 
+                    st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
+                    st.warning(f"Missing files for: {', '.join(missing)}")
+                
+                st.write("---")
+                confirm = st.toggle("I confirm all is correct and I am ready to send", value=False)
+                allow_sending = confirm
             else:
-                st.session_state.show_detective = False
+                if 'detective_triggered' in st.session_state:
+                    del st.session_state.detective_triggered
         except: pass
 
     # 2. Sender Details
