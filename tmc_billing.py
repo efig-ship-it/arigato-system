@@ -66,10 +66,7 @@ if page == "Email Sender":
             df_ex = pd.read_excel(up_ex)
             comp_col = df_ex.columns[0]
             excel_comps = [str(c).strip() for c in df_ex[comp_col].dropna().unique()]
-            file_names = [f.name.lower() for f in uploaded_files]
-            orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
-            missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
-            if orphans or missing:
+            if not any(c.lower() in f.name.lower() for c in excel_comps for f in uploaded_files):
                 confirm = st.toggle("🚨 I confirm all is correct", value=False)
                 allow_sending = confirm
                 if not confirm:
@@ -130,24 +127,20 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (UPDATED METRICS) ---
+# --- Page 2: Analytics Dashboard (UNTOUCHED PIVOTS) ---
 elif page == "Analytics Dashboard":
     st.markdown("<style>[data-testid='stMetricValue'] { font-size: 20px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
     df = get_history_df()
     if not df.empty:
-        # חישובי סכומים דינמיים לפי סטטוס
         total_billed = df['Amount'].sum()
         total_collected = df[df['Status'] == 'Paid']['Amount'].sum()
         total_outstanding = total_billed - total_collected
-        
-        # מדדים עליונים חדשים
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Billed", f"${total_billed:,.2f}")
-        m2.metric("Total Collected", f"${total_collected:,.2f}", delta_color="normal")
-        m3.metric("Outstanding", f"${total_outstanding:,.2f}", delta="- Waiting", delta_color="inverse")
+        m2.metric("Total Collected", f"${total_collected:,.2f}")
+        m3.metric("Outstanding", f"${total_outstanding:,.2f}")
         m4.metric("Last Sender", df['Sender'].iloc[0])
-
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
@@ -160,52 +153,53 @@ elif page == "Analytics Dashboard":
             res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        
         with st.expander("📂 Full History Log", expanded=True):
             log_df = df.copy()
             log_df['Amount'] = log_df.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(log_df[['Date', 'Company', 'Amount', 'Status', 'Sender']], use_container_width=True, hide_index=True)
-    else: st.info("No data recorded.")
+    else: st.info("No data.")
 
-# --- Page 3: Collections Control (DYNAMIC STATUS COLORS) ---
+# --- Page 3: Collections Control (SINGLE TABLE + AUTO COLOR) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
     df = get_history_df()
     if not df.empty:
         today = date.today()
-        def check_status(row):
+        # לוגיקת חריגה אוטומטית לתצוגה
+        def apply_overdue_logic(row):
             due = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
             if row['Status'] != 'Paid' and due and today > due: return 'Overdue'
             return row['Status']
         
-        df['Display_Status'] = df.apply(check_status, axis=1)
+        df['Status'] = df.apply(apply_overdue_logic, axis=1)
 
-        def color_status_only(val):
+        # פונקציית צביעת סטטוס בלבד
+        def color_status(val):
             if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
             if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;'
             return ''
 
-        st.write("Edit **Status** or **Notes** then click **Save**.")
+        st.write("Edit **Status** or **Notes** (Double-click to type). Colors apply after **Save**.")
+        
+        # טבלה אחת לעריכה עם צביעה מובנית
         edited_df = st.data_editor(
-            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']],
+            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'Notes']].style.map(color_status, subset=['Status']),
             column_config={
                 "rowid": None,
-                "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
+                "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
                 "Notes": st.column_config.TextColumn("Notes / Ref", width="large"),
                 "Amount": st.column_config.NumberColumn(format="%.2f")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
-            hide_index=True, use_container_width=True, key="col_editor_v4"
+            hide_index=True, use_container_width=True, key="col_editor_v5"
         )
         
-        st.write("**Visual Tracker:**")
-        st.dataframe(edited_df.style.applymap(color_status_only, subset=['Display_Status']), use_container_width=True, hide_index=True)
-
         if st.button("💾 Save All Changes", use_container_width=True):
             conn = sqlite3.connect('billing_history.db')
             for _, row in edited_df.iterrows():
-                final_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
-                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (final_status, str(row['Notes']), row['rowid']))
+                # שומרים כ-Sent אם זה Overdue כדי שהלוגיקה תמשיך לבדוק אוטומטית
+                save_status = 'Sent' if row['Status'] == 'Overdue' else row['Status']
+                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (save_status, str(row['Notes']), row['rowid']))
             conn.commit(); conn.close()
-            st.success("Saved!"); time.sleep(1); st.rerun()
+            st.success("Changes Saved!"); time.sleep(1); st.rerun()
     else: st.info("No records.")
