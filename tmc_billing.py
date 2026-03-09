@@ -38,7 +38,7 @@ init_db()
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard"])
 
-# --- Page 1: Email Sender (UNTOUCHED - Exact Original Style) ---
+# --- Page 1: Email Sender (ללא שינוי) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .stMetric { background-color: #f8f9fb; padding: 10px; border-radius: 10px; border: 1px solid #ddd; }
@@ -95,7 +95,7 @@ if page == "Email Sender":
                 if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
         except: pass
 
-    # 2. Sender Details (The original App Password Instructions are here)
+    # 2. Sender Details
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -120,7 +120,6 @@ if page == "Email Sender":
         if up_ex and uploaded_files and user_mail:
             try:
                 df = pd.read_excel(up_ex).dropna(how='all')
-                prog = st.progress(0)
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
@@ -147,58 +146,48 @@ if page == "Email Sender":
                                      (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files), amt))
                         conn.commit(); conn.close()
                         sent_count += 1
-                    prog.progress((i + 1) / len(df))
                 
                 server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(4); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (NEW Dynamic Pivots) ---
+# --- Page 2: Analytics Dashboard (עם קיפול ללוג) ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Dynamic Billing Analytics")
+    st.title("📊 Billing Matrix & Tracking")
     df = get_history_df()
     
     if not df.empty:
-        # פילטרים דינמיים בתפריט הצד או למעלה
-        st.subheader("🔍 Filters")
+        st.subheader("🔍 Filter Records")
         df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
         df = df.dropna(subset=['Date_obj'])
         
-        f1, f2 = st.columns([1, 1])
-        sel_comp = f1.multiselect("Select Companies", options=sorted(df['Company'].unique()))
-        sel_range = f2.date_input("Select Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
-        
-        # החלת הפילטרים
+        c1, c2 = st.columns(2)
+        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
+        sel_date = c2.date_input("Select Date Range", value=[df['Date_obj'].min(), df['Date_obj'].max()])
+
         filtered_df = df.copy()
         if sel_comp:
             filtered_df = filtered_df[filtered_df['Company'].isin(sel_comp)]
-        if len(sel_range) == 2:
-            filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
+        if len(sel_date) == 2:
+            filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_date[0]) & (filtered_df['Date_obj'].dt.date <= sel_date[1])]
 
         st.divider()
 
-        # 3 פיבוטים דינמיים
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("✉️ **Emails per Company**")
-            p1 = filtered_df.groupby('Company')['Recipients'].sum().reset_index()
-            st.dataframe(p1, use_container_width=True, hide_index=True)
-
-        with col2:
-            st.write("📅 **Activity by Date**")
-            p2 = filtered_df.groupby(['Date', 'Company']).size().reset_index(name='Invoices')
-            st.dataframe(p2, use_container_width=True, hide_index=True)
-
-        with col3:
-            st.write("💰 **Total Amount per Company**")
-            p3 = filtered_df.groupby('Company')['Amount'].sum().reset_index()
-            st.dataframe(p3.style.format({"Amount": "${:,.2f}"}), use_container_width=True, hide_index=True)
+        # תצוגה מפורטת
+        st.subheader("💰 Billing per Invoice (Dynamic List)")
+        pivot_view = filtered_df[['Date', 'Company', 'Amount', 'Recipients']].copy()
+        pivot_view = pivot_view.rename(columns={'Recipients': 'Emails Sent', 'Amount': 'Billing Amount'})
+        st.dataframe(pivot_view.style.format({"Billing Amount": "${:,.2f}"}), use_container_width=True, hide_index=True)
 
         st.divider()
-        st.subheader("📂 Full Filtered Log")
-        st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+        col_sum1, col_sum2 = st.columns(2)
+        col_sum1.metric("Total Sum for Selected Filters", f"${filtered_df['Amount'].sum():,.2f}")
+        col_sum2.metric("Total Emails for Selected Filters", int(filtered_df['Recipients'].sum()))
 
-        if st.sidebar.button("🗑️ Reset All Data"):
+        # החזרת הקיפול (Expander) לתמונה שצירפת
+        with st.expander("📂 Full Filtered Log"):
+            st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
+
+        if st.sidebar.button("🗑️ Reset All History"):
             conn = sqlite3.connect('billing_history.db'); conn.execute("DELETE FROM history"); conn.commit(); conn.close(); st.rerun()
     else:
-        st.info("No data yet. Send invoices to populate the dashboard.")
+        st.info("No billing data yet.")
