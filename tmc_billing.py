@@ -24,12 +24,14 @@ def play_audio(url):
     """, height=0)
 
 def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
-def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin.mp3")
+def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
-# --- Database ---
+# --- Database (Updated for Amount) ---
 def init_db():
     conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-    conn.execute('CREATE TABLE IF NOT EXISTS history (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER)')
+    # יצירת טבלה עם עמודת Amount
+    conn.execute('''CREATE TABLE IF NOT EXISTS history 
+                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL)''')
     conn.commit(); conn.close()
 
 def get_history_df():
@@ -81,7 +83,6 @@ if page == "Email Sender":
             missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
             
             if orphans or missing:
-                # הצגת כפתור האישור - הוא חייב להיות בחוץ כדי להשפיע על allow_sending
                 confirm = st.toggle("🚨 I confirm data is correct (Hides Detective & Enables Sending)", value=False)
                 allow_sending = confirm
 
@@ -89,7 +90,6 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective()
                         st.session_state.sound_triggered = True
-                    
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     if orphans: 
                         st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
@@ -103,7 +103,7 @@ if page == "Email Sender":
                 if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
         except: pass
 
-    # 2. Sender Details
+    # 2. Sender Details (הפירוט המלא חזר!)
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
@@ -111,15 +111,21 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Search 'App passwords' and create one.")
+            st.markdown("""
+            To send emails via Gmail, you need a unique **App Password**.
+            *Standard login passwords will not work.*
+
+            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
+            2. Make sure **2-Step Verification** is turned **ON**.
+            3. Search for **'App passwords'** in the top search bar.
+            4. Select a name (e.g., "TMC Billing") and click **Create**.
+            5. Copy the **16-character code** and paste it here.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
-    # כפתור השליחה
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
-        if not user_mail or not user_pass:
-            st.error("Please enter Gmail Address and App Password!")
-        elif up_ex and uploaded_files:
+        if up_ex and uploaded_files and user_mail:
             try:
                 df = pd.read_excel(up_ex).dropna(how='all')
                 prog = st.progress(0)
@@ -133,11 +139,14 @@ if page == "Email Sender":
                     emails = [e.strip() for e in raw_emails if '@' in e and '.' in e]
                     files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                     
+                    # שליפת סכום מעמודת Amount באקסל
+                    amount = row.get('Amount', 0)
+                    
                     if emails and files:
                         msg = MIMEMultipart()
                         msg['Subject'] = f"{user_subj} - {company}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Attached files for {company}.\nPeriod: {current_period}", 'plain'))
+                        msg.attach(MIMEText(f"Attached files for {company}.\nPeriod: {current_period}\nTotal Amount: {amount}", 'plain'))
                         for f in files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
@@ -145,7 +154,8 @@ if page == "Email Sender":
                         server.send_message(msg)
                         
                         conn = sqlite3.connect('billing_history.db', check_same_thread=False)
-                        conn.execute("INSERT INTO history VALUES (?, ?, ?, ?)", (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files)))
+                        conn.execute("INSERT INTO history (Date, Company, Recipients, Files, Amount) VALUES (?, ?, ?, ?, ?)", 
+                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(files), amount))
                         conn.commit(); conn.close()
                         sent_count += 1
                     prog.progress((i + 1) / len(df))
@@ -153,24 +163,34 @@ if page == "Email Sender":
                 server.quit(); sound_success(); st.balloons()
                 st.success(f"Done! {sent_count} emails sent."); time.sleep(4); st.rerun()
             except Exception as e:
-                st.error(f"❌ Sending Error: {str(e)}")
-                with st.expander("Show Technical Details"): st.code(traceback.format_exc())
+                st.error(f"❌ Error: {str(e)}")
 
 # --- Page 2: Analytics ---
 elif page == "Analytics Dashboard":
-    st.title("📊 Data Analytics Dashboard")
+    st.title("📊 Financial Analytics Dashboard")
     df_raw = get_history_df()
     if not df_raw.empty:
         df_raw['Date_obj'] = pd.to_datetime(df_raw['Date'], dayfirst=True, errors='coerce')
+        
         m1, m2, m3 = st.columns(3)
-        m1.metric("Companies", len(df_raw['Company'].unique()))
+        m1.metric("Total Invoiced Amount", f"${df_raw['Amount'].sum():,.2f}")
         m2.metric("Total Emails Sent", int(df_raw['Recipients'].sum()))
-        m3.metric("Last Activity", df_raw['Date'].iloc[0])
+        m3.metric("Avg. Invoice Value", f"${df_raw['Amount'].mean():,.2f}")
+
         st.write("---")
-        st.subheader("🏢 Company Pivot Summary")
-        pivot = df_raw.groupby('Company').agg({'Recipients': 'sum', 'Files': 'sum'}).rename(columns={'Recipients': 'Total Emails', 'Files': 'Total Files'}).reset_index()
-        st.dataframe(pivot, use_container_width=True, hide_index=True)
+        
+        # פיבוט 1: סיכום כספי לפי חברה
+        st.subheader("🏢 Company Pivot Summary (Financial)")
+        pivot_comp = df_raw.groupby('Company').agg({'Amount': 'sum', 'Recipients': 'sum', 'Files': 'sum'}).reset_index()
+        st.dataframe(pivot_comp, use_container_width=True, hide_index=True)
+
         st.write("---")
+
+        # פיבוט 2: סיכום כספי לפי תאריך
+        st.subheader("📅 Daily Billing Pivot")
+        pivot_date = df_raw.groupby('Date').agg({'Amount': 'sum', 'Company': 'count'}).rename(columns={'Company': 'Invoices'}).reset_index()
+        st.dataframe(pivot_date, use_container_width=True, hide_index=True)
+
         with st.expander("📂 Detailed Activity Log & Filters", expanded=True):
             f1, f2 = st.columns([1.5, 1])
             sel_comp = f1.multiselect("Filter by Company", options=sorted(df_raw['Company'].unique().tolist()))
@@ -180,4 +200,5 @@ elif page == "Analytics Dashboard":
             if len(sel_range) == 2:
                 filtered_df = filtered_df[(filtered_df['Date_obj'].dt.date >= sel_range[0]) & (filtered_df['Date_obj'].dt.date <= sel_range[1])]
             st.dataframe(filtered_df.drop(columns=['Date_obj']), use_container_width=True, hide_index=True)
-    else: st.info("No data recorded yet.")
+    else:
+        st.info("No data yet.")
