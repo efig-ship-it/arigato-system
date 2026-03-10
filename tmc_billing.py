@@ -7,14 +7,13 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection & Validation ---
+# --- 1. חיבור לענן (Supabase Connection) ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
         u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
         k = st.secrets["SUPABASE_KEY"].strip().replace('"', '')
         supabase = create_client(u, k)
-        # בדיקה שהטבלה מגיבה
         supabase.table("billing_history").select("id").limit(1).execute()
         st.sidebar.success("✅ Cloud Connected")
     else:
@@ -23,7 +22,7 @@ except Exception as e:
     st.sidebar.error("🚨 Cloud Connection Failed")
     st.sidebar.code(f"Error: {e}")
 
-# --- 2. CSS & Design (סגנונות מקוריים) ---
+# --- 2. עיצוב (CSS & Design) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 
 st.markdown("""<style>
@@ -34,19 +33,18 @@ st.markdown("""<style>
     .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Functions ---
+# --- 3. פונקציות עזר ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
         response = supabase.table("billing_history").select("*").order("id", desc=True).execute()
-        df = pd.DataFrame(response.data)
-        return df
+        return pd.DataFrame(response.data)
     except: return pd.DataFrame()
 
-# --- 4. Navigation ---
+# --- 4. ניווט (Sidebar) ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- עמוד 1: שליחת מיילים ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -64,15 +62,15 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
+    # מנגנון הבלש (Detectives)
     allow_sending = True
     if up_ex and uploaded_files:
         try:
             df_ex = pd.read_excel(up_ex)
             comp_col = df_ex.columns[0]
             excel_comps = [str(c).strip() for c in df_ex[comp_col].dropna().unique()]
-            file_names = [f.name.lower() for f in uploaded_files]
             orphans = [f.name for f in uploaded_files if not any(c.lower() in f.name.lower() for c in excel_comps)]
-            missing = [c for c in excel_comps if not any(c.lower() in fname for fname in file_names)]
+            missing = [c for c in excel_comps if not any(c.lower() in f.name.lower() for f in uploaded_files)]
             
             if orphans or missing:
                 confirm = st.toggle("🚨 I confirm all is correct", value=False)
@@ -94,25 +92,23 @@ if page == "Email Sender":
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. Go to [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Search 'App passwords' and create one for 'Mail'.")
+            st.markdown("1. Go to [Google Security](https://myaccount.google.com/security)\n2. Enable 2-Step Verification.\n3. Create an 'App password' for 'Mail'.")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
-    # בדיקת שגיאות מורחבת בכפתור
+    # כפתור השליחה עם בדיקת שגיאות
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
-        if not user_mail:
-            st.error("❌ Missing Gmail Address.")
-        elif not user_pass:
-            st.error("❌ Missing App Password.")
+        if not user_mail or not user_pass:
+            st.error("❌ Missing Gmail Credentials.")
         elif supabase is None:
-            st.error("❌ No Cloud Connection (Check Sidebar).")
+            st.error("❌ No Cloud Connection.")
         else:
             try:
                 df_master = pd.read_excel(up_ex).dropna(how='all')
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                with st.spinner("Sending emails and saving to cloud..."):
+                with st.spinner("Processing..."):
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -121,99 +117,92 @@ if page == "Email Sender":
                         
                         if emails and company_files:
                             msg = MIMEMultipart()
-                            msg['Subject'] = f"{user_subj} - {company}"
-                            msg['To'] = ", ".join(emails)
-                            msg.attach(MIMEText(f"Hello {company}, invoices attached for {current_period}.", 'plain'))
+                            msg['Subject'] = f"{user_subj} - {company}"; msg['To'] = ", ".join(emails)
+                            msg.attach(MIMEText(f"Hello {company}, invoices attached.", 'plain'))
                             for f in company_files:
                                 part = MIMEApplication(f.getvalue(), Name=f.name); msg.attach(part)
                             server.send_message(msg)
                             
-                            # שמירה עם עמודות באותיות גדולות
+                            # שמירה לענן (אותיות קטנות להתאמה לטבלה)
                             supabase.table("billing_history").insert({
-                                "Date": datetime.now().strftime("%d/%m/%Y"),
-                                "Company": company,
-                                "Amount": 0.0,
-                                "Status": "Sent",
-                                "Due_Date": due_val,
-                                "Currency": "$",
-                                "Sender": user_mail
+                                "date": datetime.now().strftime("%d/%m/%Y"),
+                                "company": company, "amount": 0.0, "status": "Sent",
+                                "due_date": due_val, "currency": "$", "sender": user_mail
                             }).execute()
 
-                server.quit(); st.balloons(); st.success("Success!"); time.sleep(1); st.rerun()
-            except Exception as e: st.error(f"Error during execution: {e}")
+                server.quit(); st.balloons(); st.success("Finished!"); time.sleep(1); st.rerun()
+            except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (מדדים, פילטרים ופיבוטים) ---
+# --- עמוד 2: דשבורד (Analytics) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
-        # פילטרים בשורה עליונה
         st.write("### 🛠 Filters")
         f1, f2, f3 = st.columns(3)
-        all_companies = sorted(df['Company'].unique())
-        sel_comp = f1.multiselect("Companies", all_companies)
-        
-        all_dates = sorted(df['Date'].unique())
-        sel_date = f2.multiselect("Dates", all_dates)
-        
-        all_status = sorted(df['Status'].unique())
-        sel_stat = f3.multiselect("Status", all_status)
-        
-        # החלת פילטרים
         f_df = df.copy()
-        if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
-        if sel_date: f_df = f_df[f_df['Date'].isin(sel_date)]
-        if sel_stat: f_df = f_df[f_df['Status'].isin(sel_stat)]
         
-        # מדדים (Metrics)
-        st.divider()
-        m1, m2, m3 = st.columns(3)
-        total_billed = f_df['Amount'].sum()
-        total_paid = f_df[f_df['Status'] == 'Paid']['Amount'].sum()
-        m1.metric("Total Billed", f"${total_billed:,.2f}")
-        m2.metric("Total Paid", f"${total_paid:,.2f}")
-        m3.metric("Outstanding", f"${total_billed - total_paid:,.2f}")
+        if 'company' in df.columns:
+            sel_comp = f1.multiselect("Companies", sorted(df['company'].unique()))
+            if sel_comp: f_df = f_df[f_df['company'].isin(sel_comp)]
         
-        st.divider()
-        # טבלאות פיבוט (Pivot Tables)
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
-            st.write("**Pivot: Revenue by Company**")
-            p1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
-            st.dataframe(p1, use_container_width=True, hide_index=True)
-        with col_p2:
-            st.write("**Pivot: Revenue by Date**")
-            p2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
-            st.dataframe(p2, use_container_width=True, hide_index=True)
-    else: st.info("No data found in cloud.")
+        if 'date' in df.columns:
+            sel_date = f2.multiselect("Dates", sorted(df['date'].unique()))
+            if sel_date: f_df = f_df[f_df['date'].isin(sel_date)]
+            
+        if 'status' in df.columns:
+            sel_stat = f3.multiselect("Status", sorted(df['status'].unique()))
+            if sel_stat: f_df = f_df[f_df['status'].isin(sel_stat)]
 
-# --- PAGE 3: CONTROL (צבעים דינמיים ועריכה) ---
+        st.divider()
+        m1, m2 = st.columns(2)
+        if 'amount' in f_df.columns:
+            total_billed = f_df['amount'].sum()
+            total_paid = f_df[f_df['status'] == 'Paid']['amount'].sum() if 'status' in f_df.columns else 0
+            m1.metric("Total Billed", f"${total_billed:,.2f}")
+            m2.metric("Total Paid", f"${total_paid:,.2f}")
+
+        st.divider()
+        c_p1, c_p2 = st.columns(2)
+        with c_p1:
+            st.write("**Pivot: Company Revenue**")
+            if {'company', 'amount'}.issubset(f_df.columns):
+                p1 = f_df.groupby(['company', 'currency']).agg({'amount':'sum'}).reset_index()
+                st.dataframe(p1, use_container_width=True, hide_index=True)
+        with c_p2:
+            st.write("**Pivot: Daily Revenue**")
+            if {'date', 'amount'}.issubset(f_df.columns):
+                p2 = f_df.groupby(['date', 'currency']).agg({'amount':'sum'}).reset_index()
+                st.dataframe(p2, use_container_width=True, hide_index=True)
+    else: st.info("No data in cloud.")
+
+# --- עמוד 3: בקרת גבייה (Control) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
         def color_status(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
+            if val == 'Paid': return 'background-color: #28a745; color: white;'
             return ''
 
-        # עריכת נתונים עם צבעים
+        # הגדרת עמודות לתצוגה
+        display_cols = [c for c in ['id', 'company', 'due_date', 'amount', 'currency', 'status', 'notes'] if c in df.columns]
+        
         edited_df = st.data_editor(
-            df[['id', 'Company', 'Due_Date', 'Amount', 'Currency', 'Status', 'notes']].style.map(color_status, subset=['Status']),
+            df[display_cols].style.map(color_status, subset=['status'] if 'status' in display_cols else []),
             column_config={
                 "id": None, 
-                "Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
-                "notes": st.column_config.TextColumn("Notes", width="large")
+                "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"])
             },
-            disabled=["Company", "Due_Date", "Amount", "Currency"],
-            hide_index=True, use_container_width=True, key="control_editor"
+            disabled=['company', 'due_date', 'amount', 'currency'],
+            hide_index=True, use_container_width=True, key="ctrl_edt"
         )
         
         if st.button("💾 Save All Changes", use_container_width=True):
-            with st.spinner("Updating Cloud..."):
-                for _, row in edited_df.iterrows():
-                    supabase.table("billing_history").update({
-                        "Status": row['Status'], 
-                        "notes": str(row['notes'])
-                    }).eq("id", row['id']).execute()
-                st.success("Cloud Data Updated!"); time.sleep(1); st.rerun()
+            for _, row in edited_df.iterrows():
+                supabase.table("billing_history").update({
+                    "status": row['status'], 
+                    "notes": str(row.get('notes', ''))
+                }).eq("id", row['id']).execute()
+            st.success("Cloud Updated!"); time.sleep(1); st.rerun()
     else: st.info("No records to display.")
