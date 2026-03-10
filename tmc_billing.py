@@ -7,19 +7,27 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, date
 from supabase import create_client, Client
 
-# --- Supabase Connection ---
+# --- 1. Supabase Connection ---
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
         supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
     else:
-        st.warning("⚠️ Supabase Secrets are missing.")
+        st.warning("⚠️ Supabase Secrets are missing in Streamlit Settings.")
 except Exception as e:
     st.error(f"🚨 Connection Error: {e}")
 
-# --- Page Config ---
+# --- 2. Page Config & CSS (The Original Design) ---
 st.set_page_config(page_title="TMC Billing System PRO", layout="centered")
 
-# --- Database Fetch Function ---
+st.markdown("""<style>
+    .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
+    .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
+    .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
+    .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
+    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
+</style>""", unsafe_allow_html=True)
+
+# --- 3. Functions ---
 def get_cloud_history():
     try:
         response = supabase.table("billing_history").select("*").order("id", desc=True).execute()
@@ -30,26 +38,17 @@ def get_cloud_history():
     except:
         return pd.DataFrame()
 
-# --- Audio System ---
 def play_audio(url):
     st.components.v1.html(f"<script>new Audio('{url}').play();</script>", height=0)
 
 def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
-# --- CSS Design (העיצוב המקורי שלך) ---
-st.markdown("""<style>
-    .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
-    .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
-    .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
-    .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-</style>""", unsafe_allow_html=True)
-
-# --- Navigation ---
+# --- 4. Navigation ---
+st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -112,7 +111,7 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                with st.spinner("Sending emails and saving to cloud..."):
+                with st.spinner("Processing emails and saving to cloud..."):
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -133,16 +132,18 @@ if page == "Email Sender":
                                     total_amount += df_temp[amt_col].sum()
 
                         if emails and company_files:
+                            # 1. Send Gmail
                             msg = MIMEMultipart()
                             msg['Subject'] = f"{user_subj} - {company}"
                             msg['To'] = ", ".join(emails)
-                            msg.attach(MIMEText(f"Hello {company},\nTotal: {cur}{total_amount:,.2f}", 'plain'))
+                            msg.attach(MIMEText(f"Hello {company}, invoices attached.\nTotal: {cur}{total_amount:,.2f}", 'plain'))
                             for f in company_files:
                                 part = MIMEApplication(f.getvalue(), Name=f.name)
+                                part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                                 msg.attach(part)
                             server.send_message(msg)
                             
-                            # שמירה לענן (אותיות גדולות בדיוק כפי שביקשת)
+                            # 2. Save to Supabase (Exact Column Names)
                             supabase.table("billing_history").insert({
                                 "Date": datetime.now().strftime("%d/%m/%Y"),
                                 "Company": company,
@@ -153,37 +154,43 @@ if page == "Email Sender":
                                 "Sender": user_mail
                             }).execute()
                 
-                server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(1); st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error: {e}")
+                server.quit(); sound_success(); st.balloons(); st.success("All sent and saved!"); time.sleep(1); st.rerun()
+            except Exception as e: st.error(f"❌ Error: {e}")
 
-# --- Page 2: Analytics Dashboard ---
+# --- PAGE 2: ANALYTICS DASHBOARD ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
         c1, c2 = st.columns(2)
-        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
+        sel_comp = c1.multiselect("Filter by Company", options=sorted(df['Company'].unique()))
+        sel_range = c2.date_input("Filter by Date", value=[df['Date_obj'].min().date(), df['Date_obj'].max().date()])
         
         f_df = df.copy()
         if sel_comp: f_df = f_df[f_df['Company'].isin(sel_comp)]
-        
+        if len(sel_range) == 2:
+            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_range[0]) & (f_df['Date_obj'].dt.date <= sel_range[1])]
+
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Billed", f"${f_df['Amount'].sum():,.2f}")
-        m2.metric("Total Paid", f"${f_df[f_df['Status'] == 'Paid']['Amount'].sum():,.2f}")
-        m3.metric("Outstanding", f"${f_df['Amount'].sum() - f_df[f_df['Status'] == 'Paid']['Amount'].sum():,.2f}")
+        total_billed = f_df['Amount'].sum()
+        total_paid = f_df[f_df['Status'] == 'Paid']['Amount'].sum()
+        m1.metric("Total Billed", f"${total_billed:,.2f}")
+        m2.metric("Total Collected", f"${total_paid:,.2f}")
+        m3.metric("Outstanding", f"${total_billed - total_paid:,.2f}")
         
         st.divider()
-        st.write("**Pivot by Company**")
-        res1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
-        st.dataframe(res1, use_container_width=True, hide_index=True)
-        
-        st.write("**Pivot by Date**")
-        res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
-        st.dataframe(res2, use_container_width=True, hide_index=True)
-    else: st.info("No data in cloud.")
+        col_p1, col_p2 = st.columns(2)
+        with col_p1:
+            st.write("**Pivot by Company**")
+            p1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            st.dataframe(p1, use_container_width=True, hide_index=True)
+        with col_p2:
+            st.write("**Pivot by Date**")
+            p2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            st.dataframe(p2, use_container_width=True, hide_index=True)
+    else: st.info("No records in cloud.")
 
-# --- Page 3: Collections Control ---
+# --- PAGE 3: COLLECTIONS CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Control")
     df = get_cloud_history()
@@ -205,4 +212,4 @@ elif page == "Collections Control 🔍":
             for _, row in edited_df.iterrows():
                 supabase.table("billing_history").update({"Status": row['Status'], "Notes": str(row['Notes'])}).eq("id", row['id']).execute()
             st.success("Cloud Updated!"); time.sleep(1); st.rerun()
-    else: st.info("No records found.")
+    else: st.info("No data.")
