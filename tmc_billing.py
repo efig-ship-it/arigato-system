@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
+# --- 2. CSS & Design (🎨 סעיף 7 + יישור לימין למדריך) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -26,6 +26,7 @@ st.markdown("""<style>
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 30px 0; }
+    .rtl-guide { text-align: right; direction: rtl; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -62,7 +63,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 כולל מדריך App Password) ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -74,8 +75,7 @@ if page == "Email Sender":
         months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         sel_m = mc.selectbox("Mo", months, index=datetime.now().month - 1)
         sel_y = yc.selectbox("Yr", ["2025", "2026", "2027"], index=1)
-        current_period = f"{sel_m} {sel_y}"
-
+    
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
     allow_sending = True
@@ -101,19 +101,19 @@ if page == "Email Sender":
     user_mail = sc1.text_input("Gmail Address")
     user_pass = sc2.text_input("App Password", type="password")
 
-    # --- מדריך App Password (סעיף חדש) ---
+    # מדריך מיושר לימין
     with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה (App Password)"):
-        st.markdown("""
-        גוגל דורשת סיסמה מיוחדת בת 16 תווים כדי לשלוח מיילים דרך המערכת:
-        1. היכנס ל[חשבון גוגל שלך](https://myaccount.google.com/).
-        2. בתפריט הצד בחר ב-**Security** (אבטחה).
-        3. וודא ש-**2-Step Verification** מופעל.
-        4. חפש בשורת החיפוש למעלה את המונח **App passwords**.
-        5. תחת 'Select app' בחר **Mail**.
-        6. תחת 'Select device' בחר **Other** ורשום "TMC Billing".
-        7. לחץ על **Generate** והעתק את הקוד הצהוב שיופיע. 
+        st.markdown("""<div class="rtl-guide">
+        גוגל דורשת סיסמה מיוחדת בת 16 תווים כדי לשלוח מיילים דרך המערכת:<br>
+        1. היכנס ל<a href="https://myaccount.google.com/" target="_blank">חשבון גוגל שלך</a>.<br>
+        2. בתפריט הצד בחר ב-<b>Security</b> (אבטחה).<br>
+        3. וודא ש-<b>2-Step Verification</b> מופעל.<br>
+        4. חפש בשורת החיפוש למעלה את המונח <b>App passwords</b>.<br>
+        5. תחת 'Select app' בחר <b>Mail</b>.<br>
+        6. תחת 'Select device' בחר <b>Other</b> ורשום "TMC Billing".<br>
+        7. לחץ על <b>Generate</b> והעתק את הקוד הצהוב שיופיע.<br>
         8. הדבק את הקוד בשדה 'App Password' למעלה (ללא רווחים).
-        """)
+        </div>""", unsafe_allow_html=True)
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
@@ -123,14 +123,10 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 with st.spinner(""):
-                    st.markdown("""
-                        <div class="suitcase-container">
-                            <svg width="50" height="50" viewBox="0 0 24 24" fill="#8B4513" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M17,6H16V5c0-1.1-0.9-2-2-2h-4C8.9,3,8,3.9,8,5v1H7C5.9,6,5,6.9,5,8v11c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2V8 C19,6.9,18.1,6,17,6z M10,5h4v1h-4V5z M17,19H7V8h10V19z"/>
-                            </svg>
-                            <p style='color: #8B4513;'>Invoices are traveling...</p>
-                        </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown("""<div class="suitcase-container">
+                        <svg width="50" height="50" viewBox="0 0 24 24" fill="#8B4513" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M17,6H16V5c0-1.1-0.9-2-2-2h-4C8.9,3,8,3.9,8,5v1H7C5.9,6,5,6.9,5,8v11c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2V8 C19,6.9,18.1,6,17,6z M10,5h4v1h-4V5z M17,19H7V8h10V19z"/></svg>
+                        <p style='color: #8B4513;'>Invoices are traveling...</p></div>""", unsafe_allow_html=True)
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -147,11 +143,15 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS ---
+# --- PAGE 2: ANALYTICS (📊 Dashboard עם תאריך שליחה אחרון) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
+        # הצגת תאריך שליחה אחרון
+        last_send = df['date'].iloc[0]
+        st.info(f"🕒 **Last Invoices Sent On:** {last_send}")
+        
         st.write("### Filters")
         fc1, fc2 = st.columns(2)
         sel_comps = fc1.multiselect("Select Companies", sorted(df['company'].unique()))
@@ -194,21 +194,9 @@ elif page == "Collections Control 🔍":
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
         
         if not edit_mode:
-            st.dataframe(
-                f_df_ctrl[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}),
-                use_container_width=True, hide_index=True
-            )
+            st.dataframe(f_df_ctrl[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
         else:
-            edited_df = st.data_editor(
-                f_df_ctrl[display_cols],
-                column_config={
-                    "id": None, 
-                    "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
-                    "amount": st.column_config.NumberColumn("amount", format="%,.2f")
-                },
-                disabled=['company', 'date', 'due_date'], 
-                hide_index=True, use_container_width=True
-            )
+            edited_df = st.data_editor(f_df_ctrl[display_cols], column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("amount", format="%,.2f")}, disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
             if st.button("💾 Save Changes"):
                 for _, row in edited_df.iterrows():
                     supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '') or ''), "amount": float(row['amount'])}).eq("id", row['id']).execute()
