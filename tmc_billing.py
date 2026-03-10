@@ -7,7 +7,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection (🛡️ סעיף 1 בחוזה) ---
+# --- 1. Supabase Connection (🛡️ סעיף 1) ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
@@ -18,18 +18,16 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 בחוזה) ---
-st.set_page_config(page_title="TMC Billing PRO", layout="centered")
+# --- 2. CSS & Design (🎨 סעיף 7) ---
+st.set_page_config(page_title="TMC Billing PRO", layout="wide")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
-    .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions (🛡️ סעיף 1+3 בחוזה) ---
+# --- 3. Helper Functions (🛡️ סעיף 3) ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
@@ -63,7 +61,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 סעיף 2+4 בחוזה) ---
+# --- PAGE 1: EMAIL SENDER (📧 סעיף 4) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -126,7 +124,7 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 סעיף 5 בחוזה) ---
+# --- PAGE 2: ANALYTICS (📊 סעיף 5 + פסיקים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
@@ -145,11 +143,17 @@ elif page == "Analytics Dashboard":
         m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         c_p1, c_p2 = st.columns(2)
-        with c_p1: st.write("**Billed by Company**"); st.dataframe(f_df.groupby('company').agg({'amount':'sum'}).reset_index().style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
-        with c_p2: st.write("**Billed by Date**"); st.dataframe(f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index().style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+        with c_p1: 
+            st.write("**Billed by Company**")
+            p1 = f_df.groupby('company').agg({'amount':'sum'}).reset_index()
+            st.dataframe(p1.style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+        with c_p2: 
+            st.write("**Billed by Date**")
+            p2 = f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index()
+            st.dataframe(p2.style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיף 6 בחוזה + תוספות) ---
+# --- PAGE 3: CONTROL (🔍 סעיף 6 + סדר עמודות + פסיקים) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
@@ -165,18 +169,27 @@ elif page == "Collections Control 🔍":
             if val == 'Paid': return 'background-color: #28a745; color: white;'
             return ''
         
-        # תצוגה הכוללת due_date ופסיקים בסכומים
+        # סדר עמודות קבוע לפי החוזה: id, company, date, due_date, amount, status, notes
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
-        edited_df = st.data_editor(f_df_ctrl[display_cols].style.map(color_status, subset=['status']).format({"amount": "{:,.2f}"}), 
-                                   column_config={
-                                       "id": None, 
-                                       "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
-                                       "amount": st.column_config.NumberColumn("amount", format="%.2f")
-                                   },
-                                   disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
+        
+        edited_df = st.data_editor(
+            f_df_ctrl[display_cols].style.map(color_status, subset=['status']),
+            column_config={
+                "id": None, 
+                "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
+                "amount": st.column_config.NumberColumn("amount", format="%.2f", step=0.01)
+            },
+            disabled=['company', 'date', 'due_date'], 
+            hide_index=True, 
+            use_container_width=True
+        )
         
         if st.button("💾 Save Changes"):
             for _, row in edited_df.iterrows():
-                supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '')), "amount": float(row['amount'])}).eq("id", row['id']).execute()
+                supabase.table("billing_history").update({
+                    "status": row['status'], 
+                    "notes": str(row.get('notes', '') or ''), 
+                    "amount": float(row['amount'])
+                }).eq("id", row['id']).execute()
             st.success("Updated!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
