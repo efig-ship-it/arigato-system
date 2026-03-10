@@ -18,13 +18,16 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
+# --- 2. CSS & Design (🎨 סעיף 7 + אנימציה מוגדלת) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
+    /* עיצוב המזוודה בספינר */
+    .stSpinner > div > div { font-size: 70px !important; } 
+    .suitcase-icon { font-size: 100px; display: block; text-align: center; margin-bottom: 10px; color: #8B4513; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -61,7 +64,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 סעיף 4 עם המזוודה) ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -106,8 +109,10 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                # --- המזוודה הנוסעת בספינר ---
-                with st.spinner("🧳 Invoices are on their way . . ."):
+                # ספינר עם מזוודה חומה גדולה (🧳)
+                with st.spinner(""):
+                    st.markdown('<p class="suitcase-icon">🧳</p>', unsafe_allow_html=True)
+                    st.write("<p style='text-align:center;'>Invoices are traveling to their destination...</p>", unsafe_allow_html=True)
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -122,8 +127,7 @@ if page == "Email Sender":
                             due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
                             supabase.table("billing_history").insert({"date": it, "company": company, "amount": total_amt, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
                 
-                server.quit()
-                st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
+                server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
 # --- PAGE 2: ANALYTICS ---
@@ -140,9 +144,7 @@ elif page == "Analytics Dashboard":
         
         m1, m2, m3 = st.columns(3)
         tb = f_df['amount'].sum(); tp = f_df[f_df['status'] == 'Paid']['amount'].sum()
-        m1.metric("Total Billed (Sent)", f"${tb:,.2f}")
-        m2.metric("Total Received (Paid)", f"${tp:,.2f}")
-        m3.metric("Outstanding", f"${tb-tp:,.2f}")
+        m1.metric("Total Billed (Sent)", f"${tb:,.2f}"); m2.metric("Total Received (Paid)", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         c_p1, c_p2 = st.columns(2)
         with c_p1: 
@@ -155,7 +157,7 @@ elif page == "Analytics Dashboard":
             st.dataframe(p2, column_config={"amount": st.column_config.NumberColumn("amount", format="%,.2f")}, use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיף 6 + פסיקים) ---
+# --- PAGE 3: CONTROL (🔍 סעיף 6 + צביעה דינמית משופרת) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
@@ -168,7 +170,8 @@ elif page == "Collections Control 🔍":
         if len(c_dr) == 2: f_df_ctrl = f_df_ctrl[(f_df_ctrl['date_obj'] >= c_dr[0]) & (f_df_ctrl['date_obj'] <= c_dr[1])]
         
         def color_status(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white;'
+            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
+            if val == 'Overdue': return 'background-color: #d32f2f; color: white; font-weight: bold;'
             return ''
         
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
@@ -177,7 +180,7 @@ elif page == "Collections Control 🔍":
             f_df_ctrl[display_cols].style.map(color_status, subset=['status']),
             column_config={
                 "id": None, 
-                "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
+                "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
                 "amount": st.column_config.NumberColumn("amount", format="%,.2f")
             },
             disabled=['company', 'date', 'due_date'], 
