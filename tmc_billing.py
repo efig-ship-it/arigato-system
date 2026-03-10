@@ -39,8 +39,9 @@ def get_cloud_history():
             df['date_sent'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
             df['date_obj'] = df['date_sent'].dt.date
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
+            df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
+            df['month_year'] = df['date_sent'].dt.strftime('%Y-%m')
             
-            # לוגיקת מהירות תשלום ללא ספריות חיצוניות
             def extract_days(note, sent_date):
                 match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
                 if match and not pd.isna(sent_date):
@@ -108,9 +109,6 @@ if page == "Email Sender":
     st.subheader("2. Sender Details")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
 
-    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
-        st.markdown('<div class="rtl-guide">גוגל דורשת סיסמה בת 16 תווים: 1. כנס לחשבון גוגל > Security. 2. הפעל אימות דו-שלבי. 3. צור App password ל-Mail.</div>', unsafe_allow_html=True)
-
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
         else:
@@ -138,29 +136,68 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 Dashboard יציב) ---
+# --- PAGE 2: ANALYTICS (📊 Dashboard עם מסננים ופיבוטים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
-    df = get_cloud_history()
-    if not df.empty:
-        st.info(f"🕒 **Last Invoices Sent On:** {df['date'].iloc[0]}")
+    df_raw = get_cloud_history()
+    
+    if not df_raw.empty:
+        # --- מסננים (Filters) ---
+        st.write("### 🔍 Filters")
+        f1, f2, f3 = st.columns(3)
+        with f1: sel_comps = st.multiselect("Select Company", options=sorted(df_raw['company'].unique()))
+        with f2: sel_status = st.multiselect("Select Status", options=sorted(df_raw['status'].unique()))
+        with f3: 
+            min_date = df_raw['date_obj'].min()
+            max_date = df_raw['date_obj'].max()
+            date_range = st.date_input("Date Range", value=(min_date, max_date))
+
+        # החלת פילטרים על ה-DataFrame
+        df = df_raw.copy()
+        if sel_comps: df = df[df['company'].isin(sel_comps)]
+        if sel_status: df = df[df['status'].isin(sel_status)]
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            df = df[(df['date_obj'] >= date_range[0]) & (df['date_obj'] <= date_range[1])]
+
+        st.info(f"🕒 **Last Invoices Sent On:** {df_raw['date'].iloc[0]}")
+        
+        # מדדי מפתח (Metrics)
         m1, m2, m3 = st.columns(3)
         tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
-        m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Total Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
+        m1.metric("Billed (Filtered)", f"${tb:,.2f}"); m2.metric("Received (Filtered)", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.divider()
-        st.write("### ⚡ Average Days to Pay (Performance)")
+        
+        # --- פיבוטים (Pivot Tables) ---
+        st.write("### 🧮 Data Pivots")
+        p1, p2 = st.columns(2)
+        
+        with p1:
+            st.write("**Amount by Company & Status**")
+            pivot_comp = df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
+
+        with p2:
+            st.write("**Monthly Billing Trend**")
+            pivot_month = df.pivot_table(index='month_year', values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
+
+        st.divider()
+        
+        # ביצועי מהירות תשלום
+        st.write("### ⚡ Payment Speed Performance")
         speed_df = df[df['days_to_pay'].notna()]
         if not speed_df.empty:
             avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
             st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
-        else: st.write("No payment data collected yet.")
+        else: st.write("No payment data for filtered selection.")
 
         st.divider()
-        st.write("### 📅 Amount by Due Date")
+        st.write("### 📅 Timeline View (Due Date)")
         chart_data = df.groupby('due_date').agg({'amount':'sum'}).reset_index()
         st.bar_chart(data=chart_data, x='due_date', y='amount')
-    else: st.info("No data.")
+        
+    else: st.info("No data found in Supabase.")
 
 # --- PAGE 3: CONTROL (🔍 Collections Control 🔍) ---
 elif page == "Collections Control 🔍":
