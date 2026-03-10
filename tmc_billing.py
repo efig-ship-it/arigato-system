@@ -7,7 +7,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection (🛡️ סעיף 1) ---
+# --- 1. Supabase Connection (🛡️ סעיף 1 בחוזה) ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
@@ -18,16 +18,22 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 + אנימציה מוגדלת) ---
+# --- 2. CSS & Design (🎨 סעיף 7 + עיצוב מזוודת SVG ענקית) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
-    /* עיצוב המזוודה בספינר */
-    .stSpinner > div > div { font-size: 70px !important; } 
-    .suitcase-icon { font-size: 100px; display: block; text-align: center; margin-bottom: 10px; color: #8B4513; }
+    
+    /* עיצוב המזוודה החומה הענקית */
+    .suitcase-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin: 50px 0;
+    }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -64,7 +70,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- PAGE 1: EMAIL SENDER (📧 סעיף 4 - המזוודה הנוסעת) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -109,10 +115,18 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 
-                # ספינר עם מזוודה חומה גדולה (🧳)
                 with st.spinner(""):
-                    st.markdown('<p class="suitcase-icon">🧳</p>', unsafe_allow_html=True)
-                    st.write("<p style='text-align:center;'>Invoices are traveling to their destination...</p>", unsafe_allow_html=True)
+                    # מזוודה חומה ענקית ב-SVG (מבטיח צבע וגודל)
+                    st.markdown("""
+                        <div class="suitcase-container">
+                            <svg width="250" height="250" viewBox="0 0 24 24" fill="#8B4513" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M17,6H16V5c0-1.1-0.9-2-2-2h-4C8.9,3,8,3.9,8,5v1H7C5.9,6,5,6.9,5,8v11c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2V8 C19,6.9,18.1,6,17,6z M10,5h4v1h-4V5z M17,19H7V8h10V19z"/>
+                                <rect x="9" y="10" width="6" height="2" fill="#5D2E0C"/>
+                            </svg>
+                            <h3 style="color: #8B4513;">Invoices are traveling to their destination...</h3>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -127,7 +141,8 @@ if page == "Email Sender":
                             due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
                             supabase.table("billing_history").insert({"date": it, "company": company, "amount": total_amt, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
                 
-                server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
+                server.quit()
+                st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
 # --- PAGE 2: ANALYTICS ---
@@ -135,61 +150,53 @@ elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
-        f1, f2 = st.columns(2)
-        sel_comps = f1.multiselect("Filter Companies", sorted(df['company'].unique()))
-        dr = f2.date_input("Filter Date Range", value=[df['date_obj'].min(), df['date_obj'].max()])
-        f_df = df.copy()
-        if sel_comps: f_df = f_df[f_df['company'].isin(sel_comps)]
-        if len(dr) == 2: f_df = f_df[(f_df['date_obj'] >= dr[0]) & (f_df['date_obj'] <= dr[1])]
-        
         m1, m2, m3 = st.columns(3)
-        tb = f_df['amount'].sum(); tp = f_df[f_df['status'] == 'Paid']['amount'].sum()
+        tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
         m1.metric("Total Billed (Sent)", f"${tb:,.2f}"); m2.metric("Total Received (Paid)", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
-        c_p1, c_p2 = st.columns(2)
-        with c_p1: 
+        c1, c2 = st.columns(2)
+        with c1: 
             st.write("**Billed by Company**")
-            p1 = f_df.groupby('company').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p1, column_config={"amount": st.column_config.NumberColumn("amount", format="%,.2f")}, use_container_width=True, hide_index=True)
-        with c_p2: 
+            p1 = df.groupby('company').agg({'amount':'sum'}).reset_index()
+            st.dataframe(p1.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
+        with c2: 
             st.write("**Billed by Date**")
-            p2 = f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p2, column_config={"amount": st.column_config.NumberColumn("amount", format="%,.2f")}, use_container_width=True, hide_index=True)
+            p2 = df.groupby('date_obj').agg({'amount':'sum'}).reset_index()
+            st.dataframe(p2.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיף 6 + צביעה דינמית משופרת) ---
+# --- PAGE 3: CONTROL (🔍 תיקון צביעה סופני) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
-        cf1, cf2 = st.columns(2)
-        c_sel = cf1.multiselect("Filter Companies", sorted(df['company'].unique()))
-        c_dr = cf2.date_input("Filter Dates", value=[df['date_obj'].min(), df['date_obj'].max()])
-        f_df_ctrl = df.copy()
-        if c_sel: f_df_ctrl = f_df_ctrl[f_df_ctrl['company'].isin(c_sel)]
-        if len(c_dr) == 2: f_df_ctrl = f_df_ctrl[(f_df_ctrl['date_obj'] >= c_dr[0]) & (f_df_ctrl['date_obj'] <= c_dr[1])]
-        
+        # פונקציית צביעה ממוקדת עמודה
         def color_status(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
-            if val == 'Overdue': return 'background-color: #d32f2f; color: white; font-weight: bold;'
-            return ''
-        
+            color = ''
+            if val == 'Paid': color = 'background-color: #28a745; color: white;'
+            elif val == 'Overdue': color = 'background-color: #d32f2f; color: white;'
+            return color
+
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         
+        # החלת העיצוב על הדאטה-פריים
+        styled_df = df[display_cols].style.map(color_status, subset=['status']).format(subset=['amount'], formatter="{:,.2f}")
+
+        st.write("### 📝 Edit Statuses")
         edited_df = st.data_editor(
-            f_df_ctrl[display_cols].style.map(color_status, subset=['status']),
+            styled_df,
             column_config={
                 "id": None, 
                 "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
-                "amount": st.column_config.NumberColumn("amount", format="%,.2f")
+                "amount": st.column_config.NumberColumn("amount", format="%.2f")
             },
             disabled=['company', 'date', 'due_date'], 
             hide_index=True, 
             use_container_width=True
         )
         
-        if st.button("💾 Save Changes"):
+        if st.button("💾 Save All Changes"):
             for _, row in edited_df.iterrows():
                 supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '') or ''), "amount": float(row['amount'])}).eq("id", row['id']).execute()
             st.success("Updated!"); time.sleep(0.5); st.rerun()
-    else: st.info("No records.")
+    else: st.info("No records found.")
