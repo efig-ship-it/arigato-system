@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 - חזרה לעיצוב המקורי) ---
+# --- 2. CSS & Design (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -61,7 +61,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- PAGE 1: EMAIL SENDER (📧 סעיף 4 עם המזוודה) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -105,7 +105,9 @@ if page == "Email Sender":
                 df_master = pd.read_excel(up_ex).dropna(how='all')
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
-                with st.spinner("Processing..."):
+                
+                # --- המזוודה הנוסעת בספינר ---
+                with st.spinner("🧳 Invoices are on their way . . ."):
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
@@ -119,10 +121,12 @@ if page == "Email Sender":
                             it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
                             due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
                             supabase.table("billing_history").insert({"date": it, "company": company, "amount": total_amt, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
-                server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
+                
+                server.quit()
+                st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 סעיף 5 + פסיקים) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
@@ -144,11 +148,11 @@ elif page == "Analytics Dashboard":
         with c_p1: 
             st.write("**Billed by Company**")
             p1 = f_df.groupby('company').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p1.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
+            st.dataframe(p1, column_config={"amount": st.column_config.NumberColumn("amount", format="%,.2f")}, use_container_width=True, hide_index=True)
         with c_p2: 
             st.write("**Billed by Date**")
             p2 = f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p2.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
+            st.dataframe(p2, column_config={"amount": st.column_config.NumberColumn("amount", format="%,.2f")}, use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
 # --- PAGE 3: CONTROL (🔍 סעיף 6 + פסיקים) ---
@@ -169,15 +173,12 @@ elif page == "Collections Control 🔍":
         
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         
-        # שימוש בפורמט פנדה ישיר על הסטייל כדי להבטיח פסיקים
-        formatted_df = f_df_ctrl[display_cols].style.map(color_status, subset=['status']).format(subset=['amount'], formatter="{:,.2f}")
-        
         edited_df = st.data_editor(
-            formatted_df,
+            f_df_ctrl[display_cols].style.map(color_status, subset=['status']),
             column_config={
                 "id": None, 
                 "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
-                "amount": st.column_config.NumberColumn("amount", format="%.2f")
+                "amount": st.column_config.NumberColumn("amount", format="%,.2f")
             },
             disabled=['company', 'date', 'due_date'], 
             hide_index=True, 
