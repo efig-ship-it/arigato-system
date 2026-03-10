@@ -35,7 +35,6 @@ def get_cloud_history():
         response = supabase.table("billing_history").select("*").order("id", desc=True).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
-            # המרה אחידה לתאריכים לטובת פילטרים
             df['date_obj'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce').dt.date
             df = df.dropna(subset=['date_obj'])
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
@@ -63,7 +62,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- PAGE 1: EMAIL SENDER (📧 כולל מדריך App Password) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -98,7 +97,23 @@ if page == "Email Sender":
 
     st.write("---")
     st.subheader("2. Sender Details")
-    sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
+    sc1, sc2 = st.columns(2)
+    user_mail = sc1.text_input("Gmail Address")
+    user_pass = sc2.text_input("App Password", type="password")
+
+    # --- מדריך App Password (סעיף חדש) ---
+    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה (App Password)"):
+        st.markdown("""
+        גוגל דורשת סיסמה מיוחדת בת 16 תווים כדי לשלוח מיילים דרך המערכת:
+        1. היכנס ל[חשבון גוגל שלך](https://myaccount.google.com/).
+        2. בתפריט הצד בחר ב-**Security** (אבטחה).
+        3. וודא ש-**2-Step Verification** מופעל.
+        4. חפש בשורת החיפוש למעלה את המונח **App passwords**.
+        5. תחת 'Select app' בחר **Mail**.
+        6. תחת 'Select device' בחר **Other** ורשום "TMC Billing".
+        7. לחץ על **Generate** והעתק את הקוד הצהוב שיופיע. 
+        8. הדבק את הקוד בשדה 'App Password' למעלה (ללא רווחים).
+        """)
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
@@ -132,18 +147,15 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 Dashboard עם פילטרים) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
-        # --- פילטרים לדשבורד ---
         st.write("### Filters")
         fc1, fc2 = st.columns(2)
         sel_comps = fc1.multiselect("Select Companies", sorted(df['company'].unique()))
-        # לוח שנה (Calendar) לבחירת טווח תאריכים
         date_range = fc2.date_input("Select Date Range (Calendar)", value=[df['date_obj'].min(), df['date_obj'].max()])
-        
         f_df = df.copy()
         if sel_comps: f_df = f_df[f_df['company'].isin(sel_comps)]
         if len(date_range) == 2:
@@ -159,17 +171,15 @@ elif page == "Analytics Dashboard":
         with c2: st.write("**Billed by Date**"); st.dataframe(f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index().style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 Collections Control 🔍 - עם פילטרים) ---
+# --- PAGE 3: CONTROL (🔍 Collections Control 🔍) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
-        # --- פילטרים לקונטרול ---
         st.write("### Filters")
         cf1, cf2 = st.columns(2)
         c_sel_comps = cf1.multiselect("Filter by Company", sorted(df['company'].unique()))
         c_date_range = cf2.date_input("Filter by Date (Calendar)", value=[df['date_obj'].min(), df['date_obj'].max()])
-        
         f_df_ctrl = df.copy()
         if c_sel_comps: f_df_ctrl = f_df_ctrl[f_df_ctrl['company'].isin(c_sel_comps)]
         if len(c_date_range) == 2:
@@ -186,8 +196,7 @@ elif page == "Collections Control 🔍":
         if not edit_mode:
             st.dataframe(
                 f_df_ctrl[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}),
-                use_container_width=True, 
-                hide_index=True
+                use_container_width=True, hide_index=True
             )
         else:
             edited_df = st.data_editor(
@@ -198,16 +207,10 @@ elif page == "Collections Control 🔍":
                     "amount": st.column_config.NumberColumn("amount", format="%,.2f")
                 },
                 disabled=['company', 'date', 'due_date'], 
-                hide_index=True, 
-                use_container_width=True
+                hide_index=True, use_container_width=True
             )
-            
             if st.button("💾 Save Changes"):
                 for _, row in edited_df.iterrows():
-                    supabase.table("billing_history").update({
-                        "status": row['status'], 
-                        "notes": str(row.get('notes', '') or ''), 
-                        "amount": float(row['amount'])
-                    }).eq("id", row['id']).execute()
+                    supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '') or ''), "amount": float(row['amount'])}).eq("id", row['id']).execute()
                 st.success("Updated!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
