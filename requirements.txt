@@ -1,4 +1,6 @@
 streamlit
 pandas
 python-docx
-openpyxl
+openpyxl 
+supabase 
+
