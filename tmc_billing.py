@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 - Centered Layout) ---
+# --- 2. CSS & Design (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -107,7 +107,6 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 with st.spinner(""):
-                    # מזוודה חומה מוקטנת (50px) ב-SVG
                     st.markdown("""
                         <div class="suitcase-container">
                             <svg width="50" height="50" viewBox="0 0 24 24" fill="#8B4513" xmlns="http://www.w3.org/2000/svg">
@@ -145,36 +144,49 @@ elif page == "Analytics Dashboard":
         with c2: st.write("**Billed by Date**"); st.dataframe(df.groupby('date_obj').agg({'amount':'sum'}).reset_index().style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 Collections Control 🔍 - תיקון פסיקים וצבעים) ---
+# --- PAGE 3: CONTROL (🔍 Collections Control 🔍 - תיקון צבעים סופי) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
-        # פונקציית צביעה ממוקדת עמודה
-        def color_status_col(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
-            if val == 'Overdue': return 'background-color: #d32f2f; color: white; font-weight: bold;'
+        # פונקציית צביעת עמודה
+        def highlight_status(val):
+            if val == 'Paid': return 'background-color: #28a745; color: white;'
+            if val == 'Overdue': return 'background-color: #d32f2f; color: white;'
             return ''
 
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         
-        # החלת הסטייל על הדאטה-פריים לפני העורך
-        styled_df = df[display_cols].style.map(color_status_col, subset=['status'])
-
-        edited_df = st.data_editor(
-            styled_df,
-            column_config={
-                "id": None, 
-                "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
-                "amount": st.column_config.NumberColumn("amount", format="%,.2f", step=0.01) # פורמט פסיקים תקני
-            },
-            disabled=['company', 'date', 'due_date'], 
-            hide_index=True, 
-            use_container_width=True
-        )
+        # כפתור מעבר בין תצוגה לעריכה כדי "להכריח" את ה-CSS לעבוד
+        edit_mode = st.toggle("✏️ Edit Mode", value=False)
         
-        if st.button("💾 Save Changes"):
-            for _, row in edited_df.iterrows():
-                supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '') or ''), "amount": float(row['amount'])}).eq("id", row['id']).execute()
-            st.success("Updated!"); time.sleep(0.5); st.rerun()
+        if not edit_mode:
+            # מצב תצוגה - הצבעים מופיעים בוודאות
+            st.dataframe(
+                df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}),
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            # מצב עריכה
+            edited_df = st.data_editor(
+                df[display_cols],
+                column_config={
+                    "id": None, 
+                    "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
+                    "amount": st.column_config.NumberColumn("amount", format="%,.2f")
+                },
+                disabled=['company', 'date', 'due_date'], 
+                hide_index=True, 
+                use_container_width=True
+            )
+            
+            if st.button("💾 Save Changes"):
+                for _, row in edited_df.iterrows():
+                    supabase.table("billing_history").update({
+                        "status": row['status'], 
+                        "notes": str(row.get('notes', '') or ''), 
+                        "amount": float(row['amount'])
+                    }).eq("id", row['id']).execute()
+                st.success("Updated!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
