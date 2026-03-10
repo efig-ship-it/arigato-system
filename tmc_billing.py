@@ -18,8 +18,8 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
-st.set_page_config(page_title="TMC Billing PRO", layout="wide")
+# --- 2. CSS & Design (🎨 סעיף 7 - חזרה לעיצוב המקורי) ---
+st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
@@ -27,7 +27,7 @@ st.markdown("""<style>
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions (🛡️ סעיף 3) ---
+# --- 3. Helper Functions ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
@@ -61,7 +61,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 סעיף 4) ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -96,9 +96,7 @@ if page == "Email Sender":
 
     st.write("---")
     st.subheader("2. Sender Details")
-    sc1, sc2 = st.columns(2)
-    user_mail = sc1.text_input("Gmail Address")
-    user_pass = sc2.text_input("App Password", type="password")
+    sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing details.")
@@ -146,14 +144,14 @@ elif page == "Analytics Dashboard":
         with c_p1: 
             st.write("**Billed by Company**")
             p1 = f_df.groupby('company').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p1.style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+            st.dataframe(p1.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
         with c_p2: 
             st.write("**Billed by Date**")
             p2 = f_df.groupby('date_obj').agg({'amount':'sum'}).reset_index()
-            st.dataframe(p2.style.format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+            st.dataframe(p2.style.format(subset=['amount'], formatter="{:,.2f}"), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיף 6 + סדר עמודות + פסיקים) ---
+# --- PAGE 3: CONTROL (🔍 סעיף 6 + פסיקים) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
@@ -169,15 +167,17 @@ elif page == "Collections Control 🔍":
             if val == 'Paid': return 'background-color: #28a745; color: white;'
             return ''
         
-        # סדר עמודות קבוע לפי החוזה: id, company, date, due_date, amount, status, notes
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         
+        # שימוש בפורמט פנדה ישיר על הסטייל כדי להבטיח פסיקים
+        formatted_df = f_df_ctrl[display_cols].style.map(color_status, subset=['status']).format(subset=['amount'], formatter="{:,.2f}")
+        
         edited_df = st.data_editor(
-            f_df_ctrl[display_cols].style.map(color_status, subset=['status']),
+            formatted_df,
             column_config={
                 "id": None, 
                 "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"]),
-                "amount": st.column_config.NumberColumn("amount", format="%.2f", step=0.01)
+                "amount": st.column_config.NumberColumn("amount", format="%.2f")
             },
             disabled=['company', 'date', 'due_date'], 
             hide_index=True, 
@@ -186,10 +186,6 @@ elif page == "Collections Control 🔍":
         
         if st.button("💾 Save Changes"):
             for _, row in edited_df.iterrows():
-                supabase.table("billing_history").update({
-                    "status": row['status'], 
-                    "notes": str(row.get('notes', '') or ''), 
-                    "amount": float(row['amount'])
-                }).eq("id", row['id']).execute()
+                supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '') or ''), "amount": float(row['amount'])}).eq("id", row['id']).execute()
             st.success("Updated!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
