@@ -1,33 +1,35 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, sqlite3, traceback, re, io
+import smtplib, time, traceback, re, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from datetime import datetime, date
-import os
+from supabase import create_client, Client
+
+# --- Supabase Connection ---
+try:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    supabase: Client = create_client(url, key)
+except Exception as e:
+    st.error("🚨 Missing Secrets! Please check SUPABASE_URL and SUPABASE_KEY in Streamlit Settings.")
 
 # --- Page Config ---
-st.set_page_config(page_title="TMC Billing System", layout="centered")
+st.set_page_config(page_title="TMC Billing System PRO", layout="centered")
 
-# --- Persistent Database Setup ---
-DB_PATH = 'billing_history.db'
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute('''CREATE TABLE IF NOT EXISTS history 
-                   (Date TEXT, Company TEXT, Recipients INTEGER, Files INTEGER, Amount REAL, Sender TEXT, Currency TEXT,
-                    Status TEXT DEFAULT 'Sent', Due_Date TEXT, Notes TEXT DEFAULT '')''')
-    conn.commit(); conn.close()
-
-def get_history_df():
-    if not os.path.exists(DB_PATH):
-        init_db()
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    df = pd.read_sql_query("SELECT rowid, * FROM history ORDER BY rowid DESC", conn)
-    conn.close(); return df
-
-init_db()
+# --- Database Fetch Function (With Filter Logic) ---
+def get_cloud_history():
+    try:
+        # שליפה מהטבלה הספציפית ב-Supabase
+        response = supabase.table("Billing.history").select("*").order("id", desc=True).execute()
+        df = pd.DataFrame(response.data)
+        if not df.empty:
+            # המרת תאריכים לפורמט פייתון לצורך פילטור
+            df['Date_obj'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+        return df
+    except Exception as e:
+        return pd.DataFrame()
 
 # --- Audio System ---
 def play_audio(url):
@@ -36,18 +38,17 @@ def play_audio(url):
 def sound_success(): play_audio("https://www.myinstants.com/media/sounds/trumpet-success.mp3")
 def sound_detective(): play_audio("https://www.myinstants.com/media/sounds/spongebob-squarepants-sad-violin_5.mp3")
 
-# --- Sidebar ---
+# --- Navigation ---
 st.sidebar.title("📌 Navigation")
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- Page 1: Email Sender (RESTORED FULL VERSION) ---
+# --- Page 1: Email Sender (FULL VERSION) ---
 if page == "Email Sender":
     st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     </style>""", unsafe_allow_html=True)
 
     st.title("TMC Billing System")
@@ -64,7 +65,7 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", ["2025", "2026", "2027"], index=1, label_visibility="collapsed")
         current_period = f"{sel_m} {sel_y}"
 
-    uploaded_files = st.file_uploader("Upload Company Invoices (XLSX/PDF)", accept_multiple_files=True)
+    uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
     allow_sending = True
     if up_ex and uploaded_files:
@@ -83,31 +84,18 @@ if page == "Email Sender":
                     if 'sound_triggered' not in st.session_state:
                         sound_detective(); st.session_state.sound_triggered = True
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                    if orphans: 
-                        st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
-                        st.error(f"Unrecognized files: {', '.join(orphans)}")
-                    if missing: 
-                        st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing files for: {', '.join(missing)}")
-                else:
-                    if 'sound_triggered' in st.session_state: del st.session_state.sound_triggered
+                    if orphans: st.error(f"Unrecognized files: {', '.join(orphans)}")
+                    if missing: st.warning(f"Missing files for: {', '.join(missing)}")
         except: pass
 
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2, sc3 = st.columns([1.2, 1.2, 1.4])
-    user_mail = sc1.text_input("Gmail Address", placeholder="example@gmail.com")
+    user_mail = sc1.text_input("Gmail Address")
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
         with st.expander("🔑 How to create an App Password?"):
-            st.markdown("""
-            To send emails via Gmail, you need a unique **App Password**.
-            1. Go to your [**Google Account Security**](https://myaccount.google.com/security).
-            2. Make sure **2-Step Verification** is turned **ON**.
-            3. Search for **'App passwords'** in the top search bar.
-            4. Select a name (e.g., "TMC Billing") and click **Create**.
-            5. Copy the **16-character code** and paste it here.
-            """)
+            st.markdown("1. [Google Security](https://myaccount.google.com/security)\n2. 2-Step Verification ON.\n3. Create 'App passwords' (16 chars).")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
@@ -144,79 +132,115 @@ if page == "Email Sender":
                         msg = MIMEMultipart()
                         msg['Subject'] = f"{user_subj} - {company}"
                         msg['To'] = ", ".join(emails)
-                        msg.attach(MIMEText(f"Hello {company},\nAttached are your billing files.\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
+                        msg.attach(MIMEText(f"Hello,\nTotal Amount: {detected_currency}{total_amount:,.2f}", 'plain'))
                         for f in company_files:
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
                         server.send_message(msg)
                         
-                        conn = sqlite3.connect(DB_PATH)
-                        conn.execute("INSERT INTO history (Date, Company, Recipients, Files, Amount, Sender, Currency, Status, Due_Date) VALUES (?,?,?,?,?,?,?,?,?)", 
-                                     (datetime.now().strftime("%d/%m/%Y"), company, len(emails), len(company_files), total_amount, user_mail, detected_currency, 'Sent', due_date_val))
-                        conn.commit(); conn.close()
+                        # שמירה לענן (Supabase)
+                        data = {
+                            "Date": datetime.now().strftime("%d/%m/%Y"),
+                            "Company": company,
+                            "Amount": float(total_amount),
+                            "Status": "Sent",
+                            "Due_Date": due_date_val,
+                            "Currency": detected_currency,
+                            "Sender": user_mail
+                        }
+                        supabase.table("Billing.history").insert(data).execute()
                 
-                server.quit(); sound_success(); st.balloons(); st.success("Success!"); time.sleep(2); st.rerun()
+                server.quit(); sound_success(); st.balloons(); st.success("Success! Saved to Cloud."); time.sleep(2); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- Page 2: Analytics Dashboard (RESTORED) ---
+# --- Page 2: Analytics Dashboard (WITH FILTERS) ---
 elif page == "Analytics Dashboard":
     st.markdown("<style>[data-testid='stMetricValue'] { font-size: 18px !important; }</style>", unsafe_allow_html=True)
     st.title("📊 Billing Matrix Dashboard")
-    df = get_history_df()
+    df = get_cloud_history()
+    
     if not df.empty:
-        total_billed = df['Amount'].sum()
-        total_collected = df[df['Status'] == 'Paid']['Amount'].sum()
+        # --- Filters Section ---
+        c1, c2 = st.columns(2)
+        sel_comp = c1.multiselect("Select Company", options=sorted(df['Company'].unique()))
+        
+        # תאריכים
+        min_date = df['Date_obj'].min().date()
+        max_date = df['Date_obj'].max().date()
+        sel_range = c2.date_input("Date Range", value=[min_date, max_date])
+        
+        # החלת פילטרים
+        f_df = df.copy()
+        if sel_comp:
+            f_df = f_df[f_df['Company'].isin(sel_comp)]
+        if len(sel_range) == 2:
+            f_df = f_df[(f_df['Date_obj'].dt.date >= sel_range[0]) & (f_df['Date_obj'].dt.date <= sel_range[1])]
+
+        # מדדים
+        total_billed = f_df['Amount'].sum()
+        total_collected = f_df[f_df['Status'] == 'Paid']['Amount'].sum()
+        
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Billed", f"${total_billed:,.2f}")
         m2.metric("Total Collected", f"${total_collected:,.2f}")
         m3.metric("Outstanding", f"${total_billed - total_collected:,.2f}")
+        
         st.divider()
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Pivot by Company**")
-            res1 = df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res1 = f_df.groupby(['Company', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res1['Amount'] = res1.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res1.drop(columns=['Currency']), use_container_width=True, hide_index=True)
         with p2:
             st.write("**Pivot by Date**")
-            res2 = df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
+            res2 = f_df.groupby(['Date', 'Currency']).agg({'Amount':'sum'}).reset_index()
             res2['Amount'] = res2.apply(lambda x: f"{x['Currency']}{x['Amount']:,.2f}", axis=1)
             st.dataframe(res2.drop(columns=['Currency']), use_container_width=True, hide_index=True)
-        
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button("📥 Download Backup (CSV)", data=csv, file_name=f"billing_backup_{date.today()}.csv", mime='text/csv')
-    else: st.info("No data recorded.")
+    else: st.info("No cloud data found.")
 
-# --- Page 3: Collections Control ---
+# --- Page 3: Collections Control (DYNAMIC COLORS & CLOUD SYNC) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections & Payment Control")
-    df = get_history_df()
+    df = get_cloud_history()
+    
     if not df.empty:
         today = date.today()
+        # לוגיקת חריגה
         def check_status(row):
             due = datetime.strptime(row['Due_Date'], "%Y-%m-%d").date() if row['Due_Date'] else None
             if row['Status'] != 'Paid' and due and today > due: return 'Overdue'
             return row['Status']
+        
         df['Display_Status'] = df.apply(check_status, axis=1)
+
         def color_status(val):
             if val == 'Paid': return 'background-color: #28a745; color: white; font-weight: bold;'
             if val == 'Overdue': return 'background-color: #dc3545; color: white; font-weight: bold;'
             return ''
+
+        st.write("Edit **Status** or **Notes** then click **Save**.")
+        
+        # טבלה אחת לעריכה
         edited_df = st.data_editor(
-            df[['rowid', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']].style.map(color_status, subset=['Display_Status']),
+            df[['id', 'Company', 'Due_Date', 'Amount', 'Currency', 'Display_Status', 'Notes']].style.map(color_status, subset=['Display_Status']),
             column_config={
-                "rowid": None,
+                "id": None, 
                 "Display_Status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
                 "Notes": st.column_config.TextColumn("Notes / Ref", width="large")
             },
             disabled=["Company", "Due_Date", "Amount", "Currency"],
-            hide_index=True, use_container_width=True, key="col_editor_final"
+            hide_index=True, use_container_width=True, key="col_editor_supabase"
         )
+        
         if st.button("💾 Save All Changes", use_container_width=True):
-            conn = sqlite3.connect(DB_PATH)
             for _, row in edited_df.iterrows():
-                save_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
-                conn.execute("UPDATE history SET Status = ?, Notes = ? WHERE rowid = ?", (save_status, str(row['Notes']), row['rowid']))
-            conn.commit(); conn.close()
-            st.success("Changes Saved!"); time.sleep(1); st.rerun()
+                # שמירה לענן: אם זה Overdue שומרים כ-Sent כדי שהלוגיקה תמשיך לרוץ
+                db_status = 'Sent' if row['Display_Status'] == 'Overdue' else row['Display_Status']
+                supabase.table("Billing.history").update({
+                    "Status": db_status, 
+                    "Notes": str(row['Notes'])
+                }).eq("id", row['id']).execute()
+            st.success("Changes Saved to Cloud!"); time.sleep(1); st.rerun()
+    else: st.info("No records in cloud.")
