@@ -7,7 +7,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection (🛡️ בסיס נתונים) ---
+# --- 1. Supabase Connection ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
@@ -18,14 +18,12 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 עיצוב ושפה - ללא שינוי) ---
+# --- 2. CSS & Design ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
-    .detective-header { font-size: 80px; font-weight: 900; color: #d32f2f; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
-    .reverse-detective-header { font-size: 80px; font-weight: 900; color: #f57c00; text-align: center; text-transform: uppercase; margin-bottom: 10px; }
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
 </style>""", unsafe_allow_html=True)
 
@@ -46,6 +44,7 @@ def clean_amount(val):
     if pd.isna(val) or val == "": return 0.0
     if isinstance(val, (int, float)): return float(val)
     try:
+        # ניקוי אגרסיבי: משאיר רק מספרים ונקודה
         clean_val = re.sub(r'[^\d.]', '', str(val))
         return float(clean_val) if clean_val else 0.0
     except: return 0.0
@@ -53,7 +52,7 @@ def clean_amount(val):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 שליחת מיילים - כולל SUCCESS ומוזיקה) ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -71,7 +70,6 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
-    # 🕵️‍♂️ הבלש (400px)
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -95,58 +93,65 @@ if page == "Email Sender":
     user_mail = sc1.text_input("Gmail Address")
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
-        with st.expander("🔑 How to create an App Password? (FULL GUIDE)"):
-            st.markdown("1. Go to Google Security\n2. Enable 2-Step Verification\n3. Create App Password for 'Mail'")
+        with st.expander("🔑 App Password Guide"):
+            st.markdown("1. Google Security\n2. 2-Step Verification\n3. App Passwords -> Mail -> Generate")
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail:
-            st.error("Missing credentials or file.")
+            st.error("Missing credentials.")
         else:
             try:
                 df_master = pd.read_excel(up_ex).dropna(how='all')
-                amount_col = next((c for c in df_master.columns if any(x in str(c).lower() for x in ['amount', 'סכום', 'total', 'סה"כ'])), None)
+                # לוגיקה משופרת למציאת עמודת סכום
+                cols = [str(c).lower().strip() for c in df_master.columns]
+                if 'amount' in cols:
+                    amount_col_idx = cols.index('amount')
+                else:
+                    # גיבוי: מחפש מילים נפוצות או לוקח עמודה אינדקס 2 (עמודה שלישית)
+                    amount_col_idx = next((i for i, c in enumerate(cols) if any(x in c for x in ['סכום', 'total', 'סה"כ'])), 2)
+                
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
-                with st.spinner("Processing..."):
+                
+                with st.spinner("Processing emails..."):
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                         company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
+                        
+                        raw_val = row.iloc[amount_col_idx]
+                        final_amount = clean_amount(raw_val)
+                        
                         if emails and company_files:
                             msg = MIMEMultipart()
                             msg['Subject'] = f"{user_subj} - {company}"; msg['To'] = ", ".join(emails)
                             msg.attach(MIMEText(f"Hello {company}, invoices attached.", 'plain'))
                             for f in company_files: msg.attach(MIMEApplication(f.getvalue(), Name=f.name))
                             server.send_message(msg)
-                            it = datetime.now() + timedelta(hours=2)
+                            
+                            is_time = datetime.now() + timedelta(hours=2)
                             supabase.table("billing_history").insert({
-                                "date": it.strftime("%d/%m/%Y %H:%M"), "company": company, "amount": clean_amount(row[amount_col]) if amount_col else 0.0,
-                                "status": "Sent", "currency": "$", "sender": user_mail, "due_date": f"{sel_y}-{months.index(sel_m)+1:02d}-15"
+                                "date": is_time.strftime("%d/%m/%Y %H:%M"), "company": company, 
+                                "amount": final_amount, "status": "Sent", "currency": "$", 
+                                "sender": user_mail, "due_date": f"{sel_y}-{months.index(sel_m)+1:02d}-15"
                             }).execute()
+                
                 server.quit()
                 st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True)
                 st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True)
                 time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 דשבורד - חזרה למבנה המקורי לפי החוזה) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
         st.info(f"🕒 **Last Email Sent on:** {df['date'].iloc[0]}")
-        f1, f2 = st.columns(2)
         f_df = df.copy()
-        sel_comp = f1.multiselect("Filter Companies", sorted(df['company'].unique()))
-        if sel_comp: f_df = f_df[f_df['company'].isin(sel_comp)]
-        min_date = df['date_obj'].min(); max_date = df['date_obj'].max()
-        dr_dash = f2.date_input("Filter Dates", value=[min_date, max_date])
-        if isinstance(dr_dash, list) and len(dr_dash) == 2:
-            f_df = f_df[(f_df['date_obj'] >= dr_dash[0]) & (f_df['date_obj'] <= dr_dash[1])]
         
-        st.divider()
         m1, m2, m3 = st.columns(3)
         total_billed = f_df['amount'].sum()
         total_paid = f_df[f_df['status'] == 'Paid']['amount'].sum()
@@ -157,36 +162,26 @@ elif page == "Analytics Dashboard":
         st.divider()
         c_p1, c_p2 = st.columns(2)
         with c_p1:
-            st.write("**Pivot: Revenue by Company**")
+            st.write("**Billed by Company**")
             p1 = f_df.groupby(['company', 'currency']).agg({'amount':'sum'}).reset_index()
             st.dataframe(p1, use_container_width=True, hide_index=True)
         with c_p2:
-            st.write("**Pivot: Revenue by Date**")
+            st.write("**Billed by Date**")
             p2 = f_df.groupby(['date_obj', 'currency']).agg({'amount':'sum'}).reset_index()
             st.dataframe(p2, use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 לוח בקרה) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
-        dr = st.date_input("Select Range", value=[df['date_obj'].min(), df['date_obj'].max()])
-        f_df = df.copy()
-        if isinstance(dr, list) and len(dr) == 2:
-            f_df = f_df[(f_df['date_obj'] >= dr[0]) & (f_df['date_obj'] <= dr[1])]
-        sel_comp_ctrl = st.multiselect("Filter by Company", sorted(f_df['company'].unique()))
-        if sel_comp_ctrl: f_df = f_df[f_df['company'].isin(sel_comp_ctrl)]
-        
-        def color_status(val):
-            if val == 'Paid': return 'background-color: #28a745; color: white;'
-            return ''
-        
+        st.write("💡 *Changes made here are saved permanently to the cloud database.*")
         display_cols = ['id', 'company', 'date', 'amount', 'status', 'notes']
-        edited_df = st.data_editor(f_df[display_cols].style.map(color_status, subset=['status']),
+        edited_df = st.data_editor(df[display_cols], 
                                    column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute"])},
                                    disabled=['company', 'date'], hide_index=True, use_container_width=True)
-        if st.button("💾 Save All Changes"):
+        if st.button("💾 Save Changes to Cloud"):
             for _, row in edited_df.iterrows():
                 supabase.table("billing_history").update({"status": row['status'], "notes": str(row.get('notes', '')), "amount": float(row['amount'])}).eq("id", row['id']).execute()
-            st.success("Updated!"); time.sleep(0.5); st.rerun()
+            st.success("Data secured in cloud!"); time.sleep(0.5); st.rerun()
