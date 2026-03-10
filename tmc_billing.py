@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import smtplib, time, re, io
-import plotly.express as px
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
@@ -41,14 +40,14 @@ def get_cloud_history():
             df['date_obj'] = df['date_sent'].dt.date
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
             
-            # לוגיקת "מהירות תשלום" (מתוך ה-Notes)
-            def extract_paid_date(note):
+            # לוגיקת מהירות תשלום ללא ספריות חיצוניות
+            def extract_days(note, sent_date):
                 match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
-                if match: return pd.to_datetime(match.group(1), format='%d/%m/%y')
+                if match and not pd.isna(sent_date):
+                    paid_dt = pd.to_datetime(match.group(1), format='%d/%m/%y')
+                    return (paid_dt - sent_date).days
                 return None
-            
-            df['paid_date'] = df['notes'].apply(extract_paid_date)
-            df['days_to_pay'] = (df['paid_date'] - df['date_sent']).dt.days
+            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent']), axis=1)
         return df
     except: return pd.DataFrame()
 
@@ -109,6 +108,9 @@ if page == "Email Sender":
     st.subheader("2. Sender Details")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
 
+    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
+        st.markdown('<div class="rtl-guide">גוגל דורשת סיסמה בת 16 תווים: 1. כנס לחשבון גוגל > Security. 2. הפעל אימות דו-שלבי. 3. צור App password ל-Mail.</div>', unsafe_allow_html=True)
+
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
         else:
@@ -136,36 +138,23 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 Dashboard עם ניתוח חריגות ומהירות תשלום) ---
+# --- PAGE 2: ANALYTICS (📊 Dashboard יציב) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
         st.info(f"🕒 **Last Invoices Sent On:** {df['date'].iloc[0]}")
-        
         m1, m2, m3 = st.columns(3)
         tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
         m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Total Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.divider()
-        c_pie, c_speed = st.columns(2)
-        
-        with c_pie:
-            st.write("### 🥧 Unpaid Debt Analysis")
-            unpaid_df = df[df['status'] != 'Paid']
-            if not unpaid_df.empty:
-                fig = px.pie(unpaid_df, values='amount', names='status', color='status',
-                             color_discrete_map={'Overdue':'#d32f2f', 'Sent':'#31333F', 'In Dispute':'#f57c00'})
-                st.plotly_chart(fig, use_container_width=True)
-            else: st.write("All invoices paid! 🎉")
-
-        with c_speed:
-            st.write("### ⚡ Average Days to Pay")
-            speed_df = df[df['days_to_pay'].notna()]
-            if not speed_df.empty:
-                avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
-                st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
-            else: st.write("Waiting for more payment data...")
+        st.write("### ⚡ Average Days to Pay (Performance)")
+        speed_df = df[df['days_to_pay'].notna()]
+        if not speed_df.empty:
+            avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
+            st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+        else: st.write("No payment data collected yet.")
 
         st.divider()
         st.write("### 📅 Amount by Due Date")
@@ -173,7 +162,7 @@ elif page == "Analytics Dashboard":
         st.bar_chart(data=chart_data, x='due_date', y='amount')
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 Collections Control 🔍 + תיעוד אוטומטי) ---
+# --- PAGE 3: CONTROL (🔍 Collections Control 🔍) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
@@ -186,28 +175,19 @@ elif page == "Collections Control 🔍":
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
         
-        with st.expander("📋 Billing Records Management", expanded=True):
+        with st.expander("📋 Click to Manage Billing Records", expanded=True):
             if not edit_mode:
                 st.dataframe(df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
-                edited_df = st.data_editor(df[display_cols], 
-                    column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("amount", format="%,.2f")},
-                    disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
-                
+                edited_df = st.data_editor(df[display_cols], column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("amount", format="%,.2f")}, disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
                 if st.button("💾 Save Changes"):
                     for i, row in edited_df.iterrows():
                         old_row = df[df['id'] == row['id']].iloc[0]
                         new_notes = str(row.get('notes', '') or '')
-                        
-                        # הוספת חותמת זמן אוטומטית לשדה ה-Notes (סעיף 8)
                         if row['status'] != old_row['status']:
                             timestamp = datetime.now().strftime("%d/%m/%y")
                             status_tag = f"[Paid on {timestamp}]" if row['status'] == 'Paid' else f"[Status to {row['status']} on {timestamp}]"
-                            if status_tag not in new_notes:
-                                new_notes = f"{new_notes} {status_tag}".strip()
-
-                        supabase.table("billing_history").update({
-                            "status": row['status'], "notes": new_notes, "amount": float(row['amount'])
-                        }).eq("id", row['id']).execute()
-                    st.success("Changes Secured!"); time.sleep(0.5); st.rerun()
+                            if status_tag not in new_notes: new_notes = f"{new_notes} {status_tag}".strip()
+                        supabase.table("billing_history").update({"status": row['status'], "notes": new_notes, "amount": float(row['amount'])}).eq("id", row['id']).execute()
+                    st.success("Updated!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
