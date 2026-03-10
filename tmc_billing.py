@@ -4,22 +4,21 @@ import smtplib, time, re, io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-from datetime import datetime, timedelta, date # הוספתי timedelta לתיקון שעה
+from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection ---
+# --- 1. Supabase Connection (🛡️ בסיס נתונים) ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
         u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
         k = st.secrets["SUPABASE_KEY"].strip().replace('"', '')
         supabase = create_client(u, k)
-        supabase.table("billing_history").select("id").limit(1).execute()
         st.sidebar.success("✅ Cloud Connected")
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design ---
+# --- 2. CSS & Design (🎨 עיצוב ושפה) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -30,7 +29,7 @@ st.markdown("""<style>
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions ---
+# --- 3. Helper Functions (🛡️ ניקוי נתונים) ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
@@ -44,10 +43,11 @@ def get_cloud_history():
     except: return pd.DataFrame()
 
 def clean_amount(val):
+    """פונקציית ניקוי סכומים אגרסיבית לפי החוזה"""
     if pd.isna(val) or val == "": return 0.0
     if isinstance(val, (int, float)): return float(val)
     try:
-        # ניקוי תווים שהם לא מספר או נקודה עשרונית
+        # ניקוי כל תו שאינו מספר או נקודה עשרונית
         clean_val = re.sub(r'[^\d.]', '', str(val))
         return float(clean_val) if clean_val else 0.0
     except: return 0.0
@@ -55,7 +55,7 @@ def clean_amount(val):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- PAGE 1: EMAIL SENDER (📧 שליחת מיילים) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -73,14 +73,13 @@ if page == "Email Sender":
 
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
-    # מנגנון הבלש (The Detective)
+    # 🕵️‍♂️ מנגנון הבלש (The Detective)
     allow_sending = True
     if up_ex and uploaded_files:
         try:
             df_ex = pd.read_excel(up_ex)
             excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
             file_names = [f.name for f in uploaded_files]
-            
             missing = [c for c in excel_comps if not any(c.lower() in fn.lower() for fn in file_names)]
             orphans = [fn for fn in file_names if not any(c.lower() in fn.lower() for c in excel_comps)]
             
@@ -91,7 +90,7 @@ if page == "Email Sender":
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     if missing:
                         st.markdown('<p class="reverse-detective-header">Reverse Detective!</p>', unsafe_allow_html=True)
-                        st.warning(f"Missing Files for: {', '.join(missing)}")
+                        st.warning(f"Missing Files: {', '.join(missing)}")
                     if orphans:
                         st.markdown('<p class="detective-header">Detective Alert!</p>', unsafe_allow_html=True)
                         st.error(f"Unrecognized Files: {', '.join(orphans)}")
@@ -103,18 +102,27 @@ if page == "Email Sender":
     user_mail = sc1.text_input("Gmail Address")
     user_pass = sc2.text_input("App Password", type="password")
     with sc3:
-        with st.expander("🔑 How to create an App Password?"):
-            st.markdown("1. Go to Google Security\n2. Enable 2-Step Verification\n3. Create App Password for 'Mail'")
+        with st.expander("🔑 How to create an App Password? (FULL GUIDE)"):
+            st.markdown("""
+            **שלבים ליצירת קוד גישה לאפליקציה (App Password):**
+            1. היכנסו לחשבון הגוגל שלכם -> **Security** (אבטחה).
+            2. ודאו ש-**2-Step Verification** (אימות דו-שלבי) מופעל.
+            3. חפשו בשורת החיפוש למעלה **'App passwords'**.
+            4. תחת 'Select app' בחרו **'Mail'**.
+            5. תחת 'Select device' בחרו **'Other'** ורשמו "TMC Billing System".
+            6. לחצו על **Generate**.
+            7. העתיקו את הקוד הצהוב (בן 16 תווים) והדביקו אותו כאן.
+            """)
 
     user_subj = st.text_input("Email Subject", value=f"Invoice Payment Due - {current_period}")
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
-        if not up_ex or not user_mail:
-            st.error("Missing credentials or Excel file.")
+        if not up_ex or not user_mail or not user_pass:
+            st.error("Missing details or Excel file.")
         else:
             try:
                 df_master = pd.read_excel(up_ex).dropna(how='all')
-                # חיפוש עמודת סכום משופר
+                # 🛡️ חיפוש עמודת סכום משופר לפי החוזה
                 amount_col = next((c for c in df_master.columns if any(x in str(c).lower() for x in ['amount', 'סכום', 'total', 'סה"כ'])), None)
                 
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
@@ -126,9 +134,9 @@ if page == "Email Sender":
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                         company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
                         
-                        # לקיחת סכום
-                        raw_amount = row[amount_col] if amount_col is not None else 0.0
-                        final_amount = clean_amount(raw_amount)
+                        # לוגיקת סכום משופרת
+                        raw_val = row[amount_col] if amount_col is not None else 0.0
+                        final_amount = clean_amount(raw_val)
                         
                         if emails and company_files:
                             msg = MIMEMultipart()
@@ -138,39 +146,37 @@ if page == "Email Sender":
                                 msg.attach(MIMEApplication(f.getvalue(), Name=f.name))
                             server.send_message(msg)
                             
-                            # תיקון שעה לישראל (UTC+2)
-                            israel_time = datetime.now() + timedelta(hours=2)
+                            # 🕒 תיקון שעה (UTC+2)
+                            is_time = datetime.now() + timedelta(hours=2)
                             
                             supabase.table("billing_history").insert({
-                                "date": israel_time.strftime("%d/%m/%Y %H:%M"),
+                                "date": is_time.strftime("%d/%m/%Y %H:%M"),
                                 "company": company, "amount": final_amount, "status": "Sent",
                                 "due_date": f"{sel_y}-{months.index(sel_m)+1:02d}-15",
                                 "currency": "$", "sender": user_mail
                             }).execute()
 
                 server.quit()
+                # 🎉 אפקטים של סיום (Success, Balloons, Music)
                 st.balloons()
                 st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True)
                 st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True)
                 time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS ---
+# --- PAGE 2: ANALYTICS (📊 דשבורד) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
     if not df.empty:
         st.info(f"🕒 **Last Email Sent on:** {df['date'].iloc[0]}")
-        
-        st.write("### 🛠 Filters")
         f1, f2 = st.columns(2)
         f_df = df.copy()
         
         sel_comp = f1.multiselect("Filter Companies", sorted(df['company'].unique()))
         if sel_comp: f_df = f_df[f_df['company'].isin(sel_comp)]
         
-        min_date = df['date_obj'].min() if not df['date_obj'].empty else date.today()
-        max_date = df['date_obj'].max() if not df['date_obj'].empty else date.today()
+        min_date = df['date_obj'].min(); max_date = df['date_obj'].max()
         date_range_dash = f2.date_input("Filter Dates", value=[min_date, max_date])
         if isinstance(date_range_dash, list) and len(date_range_dash) == 2:
             f_df = f_df[(f_df['date_obj'] >= date_range_dash[0]) & (f_df['date_obj'] <= date_range_dash[1])]
@@ -189,18 +195,16 @@ elif page == "Analytics Dashboard":
         st.dataframe(p1, use_container_width=True, hide_index=True)
     else: st.info("No data in cloud.")
 
-# --- PAGE 3: CONTROL ---
+# --- PAGE 3: CONTROL (🔍 לוח בקרה) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df = get_cloud_history()
     if not df.empty:
         st.write("### 📅 Filter by Date Range")
-        min_d = df['date_obj'].min() if not df['date_obj'].empty else date.today()
-        max_d = df['date_obj'].max() if not df['date_obj'].empty else date.today()
-        date_range = st.date_input("Select Range", value=[min_d, max_d])
+        dr = st.date_input("Select Range", value=[df['date_obj'].min(), df['date_obj'].max()])
         f_df = df.copy()
-        if isinstance(date_range, list) and len(date_range) == 2:
-            f_df = f_df[(f_df['date_obj'] >= date_range[0]) & (f_df['date_obj'] <= date_range[1])]
+        if isinstance(dr, list) and len(dr) == 2:
+            f_df = f_df[(f_df['date_obj'] >= dr[0]) & (f_df['date_obj'] <= dr[1])]
 
         sel_comp_ctrl = st.multiselect("Filter by Company", sorted(f_df['company'].unique()))
         if sel_comp_ctrl: f_df = f_df[f_df['company'].isin(sel_comp_ctrl)]
