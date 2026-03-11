@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. Enhanced Soft-Nuvei CSS (🎨 סעיף 7) ---
+# --- 2. Enhanced Nuvei-Style CSS (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { background-color: #f4f7f9; }
@@ -29,7 +29,7 @@ st.markdown("""<style>
         box-shadow: 0 4px 6px rgba(0,0,0,0.02);
         padding: 20px;
     }
-    h1 { color: #1a202c; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 30px; }
+    h1 { color: #1a202c; font-weight: 800; margin-bottom: 30px; }
     .alert-box { border-right: 6px solid #003366; margin-bottom: 25px; }
     .alert-box h2 { font-size: 38px; margin: 0; color: #1a202c; }
     .alert-box p { font-size: 13px; color: #718096; text-transform: uppercase; font-weight: 600; margin-bottom: 5px; }
@@ -126,14 +126,13 @@ if page == "Email Sender 📧":
     st.write("---")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Account"); user_pass = sc2.text_input("App Password", type="password")
 
-    if st.button("🚀 Execute Dispatch", use_container_width=True, disabled=not allow_send):
+    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not allow_send):
         try:
             df_master = pd.read_excel(up_ex).dropna(how='all')
             server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
             server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
             
-            # --- CELEBRATION SEQUENCE BEGINS ---
-            with st.spinner("Preparing bulk dispatch..."):
+            with st.spinner("Processing dispatch..."):
                 placeholder = st.empty()
                 placeholder.markdown("""<div class="suitcase-container"><svg width="100" height="100" viewBox="0 0 24 24" fill="#8B4513"><path d="M17,6H16V5c0-1.1-0.9-2-2-2h-4C8.9,3,8,3.9,8,5v1H7C5.9,6,5,6.9,5,8v11c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2V8 C19,6.9,18.1,6,17,6z M10,5h4v1h-4V5z M17,19H7V8h10V19z"/></svg><p style='color:#8B4513;font-size:18px;font-weight:700;margin-top:10px;'>Traveling...</p></div>""", unsafe_allow_html=True)
                 
@@ -158,7 +157,7 @@ if page == "Email Sender 📧":
                 st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (🛡️ סעיפים 5, 9, 10, 12) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard 📊":
     st.title("Financial Overview")
     df_raw = get_cloud_history()
@@ -174,13 +173,8 @@ elif page == "Analytics Dashboard 📊":
         st.divider(); st.subheader("Global Filters")
         f1, f2, f3 = st.columns(3)
         sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
-        send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
-        due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
-        
         df = df_raw.copy()
         if sel_comps: df = df[df['company'].isin(sel_comps)]
-        if isinstance(send_range, tuple) and len(send_range) == 2: df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
-        if isinstance(due_range, tuple) and len(due_range) == 2: df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
 
         m1, m2, m3 = st.columns(3)
         tb, tr = df['amount'].sum(), df['received_amount'].sum()
@@ -201,6 +195,7 @@ elif page == "Analytics Dashboard 📊":
         st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.2f}"), use_container_width=True)
 
         st.write("### 📉 Efficiency Chart")
+        
         c_billed = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
         c_paid = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
         st.vega_lite_chart(pd.concat([c_billed, c_paid]), {
@@ -214,23 +209,29 @@ elif page == "Analytics Dashboard 📊":
         }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL ---
+# --- PAGE 3: CONTROL (🔍 צבעים חזרו) ---
 elif page == "Collections Control 🔍":
     st.title("Operations Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         cf1, cf2 = st.columns(2)
-        c_sel = cf1.multiselect("Companies", sorted(df_raw['company'].unique()))
-        c_due = cf2.date_input("Due Date Filter", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        c_sel = cf1.multiselect("Companies Search", sorted(df_raw['company'].unique()))
+        c_due = cf2.date_input("Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
         if isinstance(c_due, tuple) and len(c_due) == 2:
             f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
 
-        st.dataframe(f_df[['id', 'company', 'due_date', 'amount', 'received_amount', 'status']].style.format({"amount": "{:,.2f}", "received_amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+        # --- צבעים בטבלה (סעיף 6) ---
+        def highlight_st(val):
+            if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
+            if val == 'Overdue': return 'background-color: #fff5f5; color: #822727; font-weight: bold;'
+            return ''
 
-        st.divider(); st.subheader("Audit Log & Individual Update")
+        st.dataframe(f_df[['id', 'company', 'due_date', 'amount', 'received_amount', 'status']].style.applymap(highlight_st, subset=['status']).format({"amount": "{:,.2f}", "received_amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+
+        st.divider(); st.subheader("Audit & Documentation")
         f_df_sorted = f_df.sort_values(by=['due_date_obj', 'company'])
         options = f_df_sorted.apply(lambda r: f"[{r['due_date']}] - {r['company']} (${r['amount']:,.2f})", axis=1).tolist()
         option_to_id = dict(zip(options, f_df_sorted['id'].tolist()))
@@ -245,7 +246,7 @@ elif page == "Collections Control 🔍":
             c_i1, c_i2, c_i3 = st.columns([2, 1, 1])
             with c_i1: entry = st.text_input("New Note Entry:")
             with c_i2: rec_amt = st.number_input("Received ($):", value=float(row_data['received_amount']), key=f"ind_{sid}")
-            with c_i3: nst = st.selectbox("New Status:", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key=f"st_{sid}")
+            with c_i3: nst = st.selectbox("Status Update:", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key=f"st_{sid}")
             if st.button("Save Documentation"):
                 if entry: add_log_entry(sid, entry)
                 f_st = "Paid" if rec_amt >= row_data['amount'] else nst
@@ -253,7 +254,8 @@ elif page == "Collections Control 🔍":
                 add_log_entry(sid, f"Update: {f_st} | Received: ${rec_amt:,.2f}")
                 st.success("Entry committed."); time.sleep(0.5); st.rerun()
 
-        st.divider(); st.subheader("⚡ Bulk Process")
+        st.divider(); st.subheader("⚡ Batch Launch (Multi)")
+        
         bulk_prep = f_df_sorted[['id', 'company', 'due_date', 'amount', 'received_amount']].copy()
         bulk_prep['Select'] = False
         selected_bulk = st.data_editor(bulk_prep[['Select', 'company', 'due_date', 'amount', 'received_amount', 'id']], column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None, "amount": st.column_config.NumberColumn("Bill", disabled=True, format="%.2f"), "received_amount": st.column_config.NumberColumn("Pay", format="%.2f")}, disabled=['company', 'due_date', 'amount'], hide_index=True, use_container_width=True)
@@ -266,6 +268,6 @@ elif page == "Collections Control 🔍":
                     f_rec = cur if cur > 0 else orig
                     f_st = "Paid" if f_rec >= orig else "Sent"
                     supabase.table("billing_history").update({"status": f_st, "received_amount": f_rec}).eq("id", row['id']).execute()
-                    add_log_entry(row['id'], f"Bulk Update: {f_st} | ${f_rec:,.2f}")
+                    add_log_entry(row['id'], f"Batch Update: {f_st} | ${f_rec:,.2f}")
                 st.success("Bulk update successful."); time.sleep(1); st.rerun()
     else: st.info("No records found.")
