@@ -7,7 +7,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection (🛡️ סעיף 1) ---
+# --- 1. Supabase Connection ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
+# --- 2. CSS & Design ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { padding-top: 0rem; }
@@ -28,12 +28,12 @@ st.markdown("""<style>
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; }
-    .rtl-guide { text-align: right; direction: rtl; }
     div[data-testid="metric-container"] { padding: 5px 10px; border: 1px solid #f0f2f6; border-radius: 10px; }
     .alert-box { padding: 15px; border-radius: 10px; margin-bottom: 10px; }
+    .log-box { background-color: #f9f9f9; padding: 10px; border-radius: 5px; border-right: 3px solid #003366; margin-top: 5px; font-size: 13px; direction: rtl; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions (🛡️ סעיפים 1, 3, 8) ---
+# --- 3. Helper Functions ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
@@ -46,16 +46,6 @@ def get_cloud_history():
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
             df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
             df['due_date_obj'] = df['due_date_dt'].dt.date
-            
-            def extract_days(note, sent_date):
-                match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
-                if match and not pd.isna(sent_date):
-                    try:
-                        paid_dt = pd.to_datetime(match.group(1), format='%d/%m/%y')
-                        return (paid_dt - sent_date).days
-                    except: return None
-                return None
-            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent_dt']), axis=1)
         return df
     except: return pd.DataFrame()
 
@@ -78,7 +68,6 @@ def extract_total_amount_from_file(uploaded_file):
     return 0.0
 
 def add_log_entry(item_id, entry_text):
-    """סעיף 8: תיעוד שינויים עם חותמת זמן אוטומטית"""
     current_time = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%y %H:%M")
     new_entry = f"[{current_time}] {entry_text}"
     res = supabase.table("billing_history").select("notes").eq("id", item_id).execute()
@@ -102,7 +91,6 @@ if page == "Email Sender":
         sel_y = yc.selectbox("Yr", ["2025", "2026", "2027"], index=1)
     
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
-
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -150,40 +138,32 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 הכל חזר - פיבוטים, גרף ופילטרים) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        # התראות מנהל
         today_dt = date.today()
         seven_days_ago = today_dt - timedelta(days=7)
         seven_days_ahead = today_dt + timedelta(days=7)
         high_risk_sum = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < seven_days_ago)]['amount'].sum()
         forecast_sum = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today_dt) & (df_raw['due_date_obj'] <= seven_days_ahead)]['amount'].sum()
-        
         st.write("### 🚨 התראות מנהל")
         ac1, ac2 = st.columns(2)
         with ac1: st.markdown(f'<div class="alert-box" style="background-color: #ffebee; border-right: 5px solid #d32f2f;"><p style="margin:0; font-size:14px; color: #d32f2f; font-weight:bold;">🚩 בסיכון גבוה (פיגור > 7 ימים)</p><h2 style="margin:0; color: #b71c1c;">${high_risk_sum:,.2f}</h2></div>', unsafe_allow_html=True)
         with ac2: st.markdown(f'<div class="alert-box" style="background-color: #e8f5e9; border-right: 5px solid #2e7d32;"><p style="margin:0; font-size:14px; color: #2e7d32; font-weight:bold;">💰 צפי גבייה (7 ימים קרובים)</p><h2 style="margin:0; color: #1b5e20;">${forecast_sum:,.2f}</h2></div>', unsafe_allow_html=True)
-        
         st.divider()
-        st.write(f"🕒 **Last Sent:** {df_raw['date'].iloc[0]}")
-        
         f1, f2, f3 = st.columns(3)
         sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
         send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
         due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
-        
         df = df_raw.copy()
         if sel_comps: df = df[df['company'].isin(sel_comps)]
         if isinstance(send_range, tuple) and len(send_range) == 2: df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
         if isinstance(due_range, tuple) and len(due_range) == 2: df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
-
         m1, m2, m3 = st.columns(3)
         tb, tp = df['amount'].sum(), df[df['status'] == 'Paid']['amount'].sum()
         m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
-        
         st.divider()
         st.write("### 🧮 Data Pivots")
         p1, p2 = st.columns(2)
@@ -195,31 +175,14 @@ elif page == "Analytics Dashboard":
             st.write("**Forecast (by Due Date)**")
             pivot_due = df.pivot_table(index='due_date_obj', columns='status', values='amount', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_due.style.format("${:,.2f}"), use_container_width=True)
-
-        st.write("### 📉 Billed vs. Received (Grouped)")
-        chart_billed = df.groupby('due_date_obj')['amount'].sum().reset_index()
-        chart_billed['Type'] = 'Billed'
-        chart_paid = df[df['status'] == 'Paid'].groupby('due_date_obj')['amount'].sum().reset_index()
-        chart_paid['Type'] = 'Received'
-        plot_df = pd.concat([chart_billed, chart_paid])
-
-        st.vega_lite_chart(plot_df, {
-            'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 2, 'cornerRadiusTopRight': 2},
-            'encoding': {
-                'x': {'field': 'due_date_obj', 'type': 'nominal', 'title': 'Due Date'},
-                'y': {'field': 'amount', 'type': 'quantitative'},
-                'xOffset': {'field': 'Type'},
-                'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}
-            }
-        }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 הכל חזר - פילטרים, עריכה, קיפול ותיעוד) ---
+# --- PAGE 3: CONTROL (🔍 בקרה ראשונה, תיעוד והיסטוריה למטה) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        # פילטרים שחזרו
+        # 1. פילטרים בראש הדף
         cf1, cf2, cf3 = st.columns(3)
         c_sel_comps = cf1.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
         c_send_range = cf2.date_input("Filter Send Date", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
@@ -230,30 +193,16 @@ elif page == "Collections Control 🔍":
         if isinstance(c_send_range, tuple) and len(c_send_range) == 2: f_df = f_df[(f_df['date_sent_obj'] >= c_send_range[0]) & (f_df['date_sent_obj'] <= c_send_range[1])]
         if isinstance(c_due_range, tuple) and len(c_due_range) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due_range[0]) & (f_df['due_date_obj'] <= c_due_range[1])]
 
-        # כלי התיעוד המהיר
-        st.subheader("📝 תיעוד ועדכון מהיר")
-        selected_id = st.selectbox("בחר חשבונית לתיעוד:", f_df['id'], format_func=lambda x: f"ID: {x} | {f_df[f_df['id']==x]['company'].values[0]}")
-        if selected_id:
-            row_data = f_df[f_df['id'] == selected_id].iloc[0]
-            c_log1, c_log2 = st.columns([3, 1])
-            with c_log1: entry = st.text_input("הערה חדשה:")
-            with c_log2: new_st = st.selectbox("סטטוס", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']))
-            if st.button("שמור תיעוד"):
-                if entry: add_log_entry(selected_id, entry)
-                if new_st != row_data['status']:
-                    add_log_entry(selected_id, f"סטטוס שונה ל-{new_st}")
-                    supabase.table("billing_history").update({"status": new_st}).eq("id", selected_id).execute()
-                st.success("תועד!"); time.sleep(0.5); st.rerun()
-
+        # 2. הטבלה המרכזית (כולל מצב עריכה וקיפול)
+        edit_mode = st.toggle("✏️ Edit Mode", value=False)
+        display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
+        
         def highlight_status(val):
             if val == 'Paid': return 'background-color: #28a745; color: white;'
             if val == 'Overdue': return 'background-color: #d32f2f; color: white;'
             return ''
 
-        display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
-        edit_mode = st.toggle("✏️ Edit Mode", value=False) # מצב עריכה שחזר
-        
-        with st.expander("📋 Manage Billing Records", expanded=True): # קיפול שחזר
+        with st.expander("📋 Manage Billing Records", expanded=True):
             if not edit_mode:
                 st.dataframe(f_df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
@@ -263,7 +212,40 @@ elif page == "Collections Control 🔍":
                         old_row = df_raw[df_raw['id'] == row['id']].iloc[0]
                         new_notes = str(row.get('notes', '') or '')
                         if row['status'] != old_row['status']:
-                            new_notes = f"{new_notes} [Status Update: {row['status']} on {datetime.now().strftime('%d/%m/%y')}]".strip()
+                            new_notes = f"{new_notes} [Update: {row['status']} on {datetime.now().strftime('%d/%m/%y')}]".strip()
                         supabase.table("billing_history").update({"status": row['status'], "notes": new_notes, "amount": float(row['amount'])}).eq("id", row['id']).execute()
                     st.success("Updated!"); time.sleep(0.5); st.rerun()
+
+        st.divider()
+
+        # 3. מערכת תיעוד והיסטוריה (עברה למטה)
+        st.subheader("📝 מערכת תיעוד והיסטוריית גבייה")
+        selected_id = st.selectbox("בחר חשבונית לתיעוד:", f_df['id'], format_func=lambda x: f"ID: {x} | {f_df[f_df['id']==x]['company'].values[0]} | ${f_df[f_df['id']==x]['amount'].values[0]:,.2f}")
+        
+        if selected_id:
+            row_data = f_df[f_df['id'] == selected_id].iloc[0]
+            
+            # הצגת היסטוריה קיימת
+            with st.container():
+                st.markdown("**📜 היסטוריית פעולות:**")
+                notes_lines = str(row_data['notes']).split('\n')
+                found_notes = False
+                for line in notes_lines:
+                    if line.strip() and line.strip() != 'None':
+                        st.markdown(f"<div class='log-box'>{line}</div>", unsafe_allow_html=True)
+                        found_notes = True
+                if not found_notes: st.caption("אין תיעוד קודם לחשבונית זו.")
+
+            st.write("")
+            # כלי הוספת הערה
+            col_in1, col_in2 = st.columns([3, 1])
+            with col_in1: entry = st.text_input("הוסף תיעוד חדש (למשל: 'הבטיחו תשלום'):")
+            with col_in2: new_st = st.selectbox("עדכן סטטוס", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key="st_box")
+            
+            if st.button("שמור תיעוד חדש"):
+                if entry: add_log_entry(selected_id, entry)
+                if new_st != row_data['status']:
+                    add_log_entry(selected_id, f"שינוי סטטוס ל-{new_st}")
+                    supabase.table("billing_history").update({"status": new_st}).eq("id", selected_id).execute()
+                st.success("התיעוד נשמר!"); time.sleep(0.5); st.rerun()
     else: st.info("No records.")
