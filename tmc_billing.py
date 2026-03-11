@@ -122,14 +122,13 @@ if page == "Email Sender 📧":
             name_issue = "emails" not in up_ex.name.lower()
 
             if not bad_debtors.empty or missing or name_issue:
-                if not bad_debtors.empty:
-                    st.markdown('<div class="risk-box">⚠️ <b>Credit Risk Alert:</b> חברות אלו חייבות כסף מעל חודש:</div>', unsafe_allow_html=True)
-                    for _, row in bad_debtors.drop_duplicates('company').iterrows():
-                        st.error(f"● {row['company']} owes ${row['balance']:,.2f} since {row['due_date']}")
-
                 confirm_dispatch = st.checkbox("🚨 אני מאשר שהנתונים והסיכונים נבדקו (הסתר אזהרות)", value=False)
                 if not confirm_dispatch:
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
+                    if not bad_debtors.empty:
+                        st.markdown('<div class="risk-box">⚠️ <b>Credit Risk Alert:</b> חברות אלו חייבות כסף מעל חודש:</div>', unsafe_allow_html=True)
+                        for _, row in bad_debtors.drop_duplicates('company').iterrows():
+                            st.error(f"● {row['company']} owes ${row['balance']:,.2f} since {row['due_date']}")
                     if name_issue: st.error("הבלש מזהה: שם הקובץ אינו מכיל 'Emails'.")
                     if missing: st.warning(f"הבלש מזהה חוסרים עבור: {', '.join(missing)}")
             else: confirm_dispatch = True
@@ -162,18 +161,57 @@ if page == "Email Sender 📧":
                 server.quit(); placeholder.empty(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); time.sleep(3); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS ---
+# --- PAGE 2: ANALYTICS (📊 הוחזר המנוע המלא לפי החוזה) ---
 elif page == "Analytics Dashboard 📊":
     st.title("Financial Overview")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         today = date.today()
-        m1, m2, m3, m4 = st.columns(4)
-        tb, tr = df_raw['amount'].sum(), df_raw['received_amount'].sum()
-        m1.metric("Billed", f"${tb:,.0f}"); m2.metric("Received", f"${tr:,.0f}"); m3.metric("Outstanding", f"${tb-tr:,.0f}"); m4.metric("Reminded", f"${df_raw[df_raw['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
-        st.dataframe(df_raw.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.0f}"), use_container_width=True)
+        # מדדי סיכון גלובליים
+        risk_val = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < today - timedelta(days=7))]['amount'].sum()
+        forecast_val = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
+        
+        c1, c2 = st.columns(2)
+        c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e;"><p>Critical Overdue</p><h2>${risk_val:,.0f}</h2></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169;"><p>Expected (Next 7d)</p><h2>${forecast_val:,.0f}</h2></div>', unsafe_allow_html=True)
 
-# --- PAGE 3: CONTROL (🔍 הוחזר ה-Multi-Edit) ---
+        st.divider()
+        st.subheader("Global Filters")
+        f1, f2, f3 = st.columns(3)
+        sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
+        send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        
+        df = df_raw.copy()
+        if sel_comps: df = df[df['company'].isin(sel_comps)]
+        if isinstance(send_range, tuple) and len(send_range) == 2: df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
+        if isinstance(due_range, tuple) and len(due_range) == 2: df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
+
+        st.write("### Key Metrics")
+        m1, m2, m3, m4 = st.columns(4)
+        tb, tr = df['amount'].sum(), df['received_amount'].sum()
+        rem_total = df[df['status'] == 'Sent Reminder']['balance'].sum()
+        m1.metric("Billed", f"${tb:,.0f}"); m2.metric("Received", f"${tr:,.0f}"); m3.metric("Outstanding", f"${tb-tr:,.0f}"); m4.metric("Reminded", f"${rem_total:,.0f}")
+        
+        st.divider(); p1, p2 = st.columns(2)
+        with p1:
+            st.write("**By Company**")
+            st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.0f}"), use_container_width=True)
+        with p2:
+            st.write("**Payment Speed**")
+            speed = df[df['days_to_pay'].notna()]
+            if not speed.empty: st.dataframe(speed.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+        
+        st.write("**Monthly Summary**")
+        st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.0f}"), use_container_width=True)
+
+        st.write("### 📉 Efficiency Chart")
+        c_billed = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
+        c_paid = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
+        st.vega_lite_chart(pd.concat([c_billed, c_paid]), {'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 3}, 'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal'}, 'y': {'field': 'Val', 'type': 'quantitative'}, 'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}}}, use_container_width=True)
+    else: st.info("No data.")
+
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("Operations Control")
     df_raw = get_cloud_history()
