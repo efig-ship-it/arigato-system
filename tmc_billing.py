@@ -174,7 +174,7 @@ elif page == "Analytics Dashboard 📊":
     df_raw = get_cloud_history()
     if not df_raw.empty:
         today = date.today()
-        # 🚨 Alerts Management
+        # 🚨 Alerts
         risk_v = df_raw[df_raw['status'] == 'Overdue']['balance'].sum()
         forecast_v = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
         
@@ -188,27 +188,33 @@ elif page == "Analytics Dashboard 📊":
         cei_score = (due_until_now['received_amount'].sum() / due_until_now['amount'].sum() * 100) if due_until_now['amount'].sum() > 0 else 0
         m1.metric("Collection Index (CEI)", f"{cei_score:.1f}%")
         m2.metric("Total Outstanding", f"${df_raw['balance'].sum():,.0f}")
-        m3.metric("Billed (All Time)", f"${df_raw['amount'].sum():,.0f}")
-        m4.metric("Reminded Debt", f"${df_raw[df_raw['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
+        m3.metric("Reminded Debt", f"${df_raw[df_raw['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
+        m4.metric("Billed This Month", f"${df_raw[df_raw['date_sent_dt'].dt.month == today.month]['amount'].sum():,.0f}")
 
         st.divider()
         col_g1, col_g2 = st.columns(2)
         with col_g1:
+            st.subheader("📊 Status Overview")
+            status_df = df_raw.groupby('status')['amount'].sum().reset_index()
+            fig_pie = px.pie(status_df, values='amount', names='status', color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_pie, use_container_width=True)
+        with col_g2:
             st.subheader("🔥 Top 5 Debtors")
             debtors = df_raw.groupby('company')['balance'].sum().sort_values(ascending=False).head(5).reset_index()
             debtors = debtors[debtors['balance'] > 0]
             if not debtors.empty:
                 fig_bar = px.bar(debtors, x='balance', y='company', orientation='h', color='balance', color_continuous_scale='Reds')
                 st.plotly_chart(fig_bar, use_container_width=True)
-        with col_g2:
-            st.write("**📉 Efficiency: Billed vs Received**")
-            c_billed = df_raw.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
-            c_paid = df_raw.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
-            st.vega_lite_chart(pd.concat([c_billed, c_paid]), {
-                'mark': {'type': 'bar', 'width': 20, 'cornerRadiusTopLeft': 3},
-                'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal'}, 'y': {'field': 'Val', 'type': 'quantitative'},
-                             'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}}
-            }, use_container_width=True)
+
+        st.divider()
+        st.write("**📉 Efficiency: Billed vs Received (By Due Date)**")
+        c_billed = df_raw.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
+        c_paid = df_raw.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
+        st.vega_lite_chart(pd.concat([c_billed, c_paid]), {
+            'mark': {'type': 'bar', 'width': 20, 'cornerRadiusTopLeft': 3},
+            'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal', 'title': 'Due Date'}, 'y': {'field': 'Val', 'type': 'quantitative', 'title': 'Amount ($)'},
+                         'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}}
+        }, use_container_width=True)
 
         st.divider(); st.subheader("Filters & Details")
         f1, f2, f3 = st.columns(3)
@@ -262,7 +268,7 @@ elif page == "Collections Control 🔍":
                 if ent: add_log_entry(sid, ent)
                 f_st = "Paid" if rec >= row_data['amount'] else nst
                 supabase.table("billing_history").update({"status": f_st, "received_amount": float(rec)}).eq("id", sid).execute()
-                add_log_entry(sid, f"Manual: {f_st} | ${rec:,.2f}")
+                add_log_entry(sid, f"Update: {f_st} | ${rec:,.2f}")
                 st.success("Updated."); time.sleep(0.5); st.rerun()
 
         st.divider(); st.subheader("⚡ Batch Execute Launch")
