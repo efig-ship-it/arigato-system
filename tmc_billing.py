@@ -19,18 +19,24 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. UI CSS (Tuesday English Style) ---
+# --- 2. UI CSS (Luxury Navy Dark Mode) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="wide")
 st.markdown("""<style>
-    .main { background-color: #f4f7f9; }
-    div[data-testid="stMetricValue"] { font-size: 22px !important; font-weight: 700 !important; color: #003366; }
-    div[data-testid="stMetric"] { background-color: #ffffff; border-radius: 10px; border: 1px solid #e1e8ed; padding: 15px !important; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    .tuesday-header { font-size: 28px; font-weight: 900; color: #003366; margin-bottom: 10px; padding-left: 5px; }
-    .risk-box { border: 2px solid #e53e3e; background-color: #fff5f5; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
-    .detective-box { border: 2px solid #ed8936; background-color: #fffaf0; padding: 15px; border-radius: 10px; margin-bottom: 20px; }
-    .alert-box { border-right: 6px solid #003366; margin-bottom: 20px; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e1e8ed; }
-    .log-box { background-color: #ffffff; padding: 10px; border-radius: 6px; border: 1px solid #e0e4e8; border-right: 4px solid #003366; margin-bottom: 5px; font-size: 13px; direction: ltr; }
-    .success-msg { font-size: 80px; font-weight: 900; color: #28a745; text-align: center; margin-top: 10px; display: block; }
+    .stApp { background-color: #0a192f; color: #e6f1ff; }
+    section[data-testid="stSidebar"] { background-color: #112240 !important; border-right: 1px solid #233554; }
+    div[data-testid="stMetric"] { 
+        background-color: #112240; border-radius: 12px; border: 1px solid #233554; padding: 20px !important; 
+    }
+    div[data-testid="stMetricValue"] { color: #64ffda !important; font-size: 26px !important; }
+    div[data-testid="stMetricLabel"] { color: #8892b0 !important; }
+    .stButton>button {
+        background-color: #64ffda; color: #0a192f; border-radius: 8px; font-weight: 700; width: 100%;
+    }
+    .tuesday-header { font-size: 32px; font-weight: 900; color: #64ffda; margin-bottom: 20px; }
+    .alert-box { border-left: 5px solid #64ffda; margin-bottom: 20px; padding: 20px; background: #112240; border-radius: 8px; }
+    .risk-box { border: 2px solid #f7567c; background-color: #2d1b24; padding: 15px; border-radius: 10px; color: #f7567c; }
+    .detective-box { border: 2px solid #ed8936; background-color: #2d241b; padding: 15px; border-radius: 10px; color: #ed8936; }
+    .log-box { background-color: #1d2d50; padding: 12px; border-radius: 8px; border-left: 4px solid #64ffda; margin-bottom: 8px; font-size: 13px; color: #ccd6f6; direction: ltr; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -96,16 +102,16 @@ def extract_total_amount_from_file(uploaded_file):
     return 0.0
 
 # --- 4. Sidebar ---
-st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
+st.sidebar.markdown('<p class="tuesday-header">TUESDAY</p>', unsafe_allow_html=True)
 page = st.sidebar.radio("Navigation", ["Email Sender 📧", "Analytics Dashboard 📊", "Upcoming Alerts 🔔", "Collections Control 🔍", "Reminders Manager 🚨"])
 
 # --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender 📧":
-    st.title("Invoicing Center")
+    st.title("Invoicing Dispatch")
     col_up, col_due = st.columns([2, 1])
     with col_up: up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
     with col_due:
-        st.markdown('<p style="font-weight:700; color:#4a5568;">BILLING PERIOD</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-weight:700; color:#8892b0;">BILLING PERIOD</p>', unsafe_allow_html=True)
         mc, yc = st.columns(2); months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
         sel_m = mc.selectbox("Month", months, index=datetime.now().month - 1); sel_y = yc.selectbox("Year", ["2025", "2026", "2027"], index=1)
     
@@ -120,19 +126,18 @@ if page == "Email Sender 📧":
             risk_threshold = date.today() - timedelta(days=30)
             bad = df_history[(df_history['company'].isin(current_companies)) & (df_history['status'] != 'Paid') & (df_history['due_date_obj'] < risk_threshold)]
             if not bad.empty:
-                risk_cleared = st.checkbox("🚨 Risk: Confirm check for overdue debts", value=False)
+                risk_cleared = st.checkbox("🚨 Risk: Confirm manual debt check", value=False)
                 if not risk_cleared:
                     for _, r in bad.drop_duplicates('company').iterrows(): st.error(f"● {r['company']} owes ${r['balance']:,.2f}")
             file_names = [f.name for f in uploaded_files] if uploaded_files else []
             missing = [c for c in current_companies if not any(c.lower() in fn.lower() for fn in file_names)]
             if missing:
                 detective_cleared = st.checkbox("🕵️‍♂️ Detective: Confirm missing files", value=False)
-                if not detective_cleared: st.warning(f"Missing: {', '.join(missing)}")
         except: pass
 
     st.write("---")
     sc1, sc2 = st.columns(2); u_m = sc1.text_input("Gmail Account"); u_p = sc2.text_input("App Password", type="password")
-    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_ex and uploaded_files and risk_cleared and detective_cleared)):
+    if st.button("🚀 START DISPATCH", use_container_width=True, disabled=not (up_ex and uploaded_files and risk_cleared and detective_cleared)):
         try:
             df_master = pd.read_excel(up_ex).dropna(how='all')
             due_col = [c for c in df_master.columns if 'due' in c.lower()]
@@ -154,23 +159,23 @@ if page == "Email Sender 📧":
                 server.quit(); st.balloons(); st.success("SUCCESS"); time.sleep(2); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS DASHBOARD (FULLY RESTORED) ---
+# --- PAGE 2: ANALYTICS DASHBOARD ---
 elif page == "Analytics Dashboard 📊":
-    st.title("Analytics Dashboard")
+    st.title("Financial Intelligence Dashboard")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         today = date.today()
-        # 1. Alerts
+        # 🚨 Executive Alerts
         risk_v = df_raw[df_raw['status'] == 'Overdue']['balance'].sum()
         forecast_v = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
-        c_al1, c_al2 = st.columns(2)
-        c_al1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e; background-color:#fff5f5;"><p style="color:#c53030; font-weight:700;">🚨 Total Overdue</p><h2>${risk_v:,.0f}</h2></div>', unsafe_allow_html=True)
-        c_al2.markdown(f'<div class="alert-box" style="border-right-color:#38a169; background-color:#f0fff4;"><p style="color:#2f855a; font-weight:700;">🟢 Next 7d Forecast</p><h2>${forecast_v:,.0f}</h2></div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        c1.markdown(f'<div class="alert-box" style="border-left-color:#f7567c;"><p style="color:#f7567c; font-weight:700;">🚨 TOTAL OVERDUE</p><h2>${risk_v:,.0f}</h2></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="alert-box" style="border-left-color:#64ffda;"><p style="color:#64ffda; font-weight:700;">🟢 7-DAY FORECAST</p><h2>${forecast_v:,.0f}</h2></div>', unsafe_allow_html=True)
         
-        # 2. GLOBAL FILTERS (RESTORED!)
+        # 🔍 Global Filters
         st.divider(); st.subheader("Global Filters")
         f1, f2, f3 = st.columns(3)
-        sel_c = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
+        sel_c = f1.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
         s_rng = f2.date_input("Sent Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
         d_rng = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         df = df_raw.copy()
@@ -178,58 +183,56 @@ elif page == "Analytics Dashboard 📊":
         if isinstance(s_rng, tuple) and len(s_rng) == 2: df = df[(df['date_sent_obj'] >= s_rng[0]) & (df['date_sent_obj'] <= s_rng[1])]
         if isinstance(d_rng, tuple) and len(d_rng) == 2: df = df[(df['due_date_obj'] >= d_rng[0]) & (df['due_date_obj'] <= d_rng[1])]
         
-        # 3. KPIs
+        # 📈 KPI Metrics
         m1, m2, m3, m4 = st.columns(4)
         due_now = df[df['due_date_obj'] <= today]
         cei = (due_now['received_amount'].sum() / due_now['amount'].sum() * 100) if due_now['amount'].sum() > 0 else 0
-        m1.metric("CEI Index", f"{cei:.1f}%"); m2.metric("Outstanding", f"${df['balance'].sum():,.0f}"); m3.metric("Billed Total", f"${df['amount'].sum():,.0f}"); m4.metric("Reminded Debt", f"${df[df['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
+        m1.metric("CEI Index", f"{cei:.1f}%"); m2.metric("Outstanding Balance", f"${df['balance'].sum():,.0f}"); m3.metric("Billed Total", f"${df['amount'].sum():,.0f}"); m4.metric("Reminded Debt", f"${df[df['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
 
-        # 4. GRAPHS (PIE & BARS RESTORED!)
+        # 📊 Charts
         st.divider(); g1, g2 = st.columns(2)
         with g1:
             st.subheader("Status Distribution")
-            fig_p = px.pie(df.groupby('status')['amount'].sum().reset_index(), values='amount', names='status', color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_p = px.pie(df.groupby('status')['amount'].sum().reset_index(), values='amount', names='status', color_discrete_sequence=['#64ffda', '#f7567c', '#00d2ff', '#ed8936'])
+            fig_p.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="#ccd6f6")
             st.plotly_chart(fig_p, use_container_width=True)
         with g2:
             st.subheader("Top 5 Debtors")
             debtors = df.groupby('company')['balance'].sum().sort_values(ascending=False).head(5).reset_index()
             if not debtors[debtors['balance']>0].empty:
-                fig_b = px.bar(debtors[debtors['balance']>0], x='balance', y='company', orientation='h', color='balance', color_continuous_scale='Reds', labels={'balance':'Debt ($)', 'company':'Company'})
+                fig_b = px.bar(debtors[debtors['balance']>0], x='balance', y='company', orientation='h', color_discrete_sequence=['#f7567c'])
+                fig_b.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color="#ccd6f6")
                 st.plotly_chart(fig_b, use_container_width=True)
 
-        # 5. PIVOTS (ALL 3 RESTORED!)
-        st.divider(); st.subheader("Data Analysis")
-        st.write("**By Company & Status**")
-        st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.0f}"), use_container_width=True)
+        # 📑 Pivot Tables
+        st.divider(); st.subheader("Pivot Analysis")
+        st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0), use_container_width=True)
         pc1, pc2 = st.columns(2)
-        with pc1:
-            st.write("**Monthly Performance**")
-            st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.0f}"), use_container_width=True)
-        with pc2:
+        with pc1: st.write("**Monthly Summary**"); st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum'), use_container_width=True)
+        with pc2: 
             st.write("**Avg Payment Speed**")
             spd = df[df['days_to_pay'].notna()]
-            if not spd.empty: st.dataframe(spd.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True)
+            if not spd.empty: st.dataframe(spd.groupby('company')['days_to_pay'].mean().reset_index(), use_container_width=True)
 
-        # 6. EFFICIENCY GRAPH
-        st.divider(); st.write("**Billed vs Received (By Due Date)**")
+        st.divider(); st.write("**Billed vs Received (Efficiency Graph)**")
         b = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); b['Type'] = 'Billed'
         r = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); r['Type'] = 'Received'
-        st.vega_lite_chart(pd.concat([b, r]), {'mark': {'type': 'bar', 'width': 20, 'cornerRadiusTopLeft': 3}, 'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal', 'title': 'Due Date'}, 'y': {'field': 'Val', 'type': 'quantitative'}, 'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}}}, use_container_width=True)
+        st.vega_lite_chart(pd.concat([b, r]), {'mark': {'type': 'bar', 'width': 20, 'cornerRadiusTopLeft': 3}, 'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal', 'title': 'Due Date'}, 'y': {'field': 'Val', 'type': 'quantitative'}, 'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#64ffda', '#1d2d50']}}}}, use_container_width=True)
 
-# --- PAGE 3: UPCOMING ALERTS (T-7) ---
+# --- PAGE 3: UPCOMING ALERTS (T-7 Pulse) ---
 elif page == "Upcoming Alerts 🔔":
-    st.title("Proactive T-7 Alerts")
+    st.title("Proactive T-7 Pulse Board")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         target = date.today() + timedelta(days=7)
         upcoming = df_raw[(df_raw['due_date_obj'] == target) & (df_raw['status'] != 'Paid')].copy()
-        if upcoming.empty: st.write(f"No proactive reminders for {target}.")
+        if upcoming.empty: st.info(f"All quiet for {target.strftime('%Y-%m-%d')}.")
         else:
             upcoming['Select'] = False
             sel = st.data_editor(upcoming[['Select', 'company', 'due_date', 'balance', 'id']], hide_index=True, use_container_width=True)
             mf = st.file_uploader("Upload Mailing List for Emails", type=['xlsx'])
             d1, d2 = st.columns(2); mu = d1.text_input("Gmail"); mp = d2.text_input("Pass", type="password")
-            if st.button("🚀 Send Proactive Reminders"):
+            if st.button("🚀 SEND PROACTIVE REMINDERS"):
                 if not sel[sel['Select']].empty and mf:
                     em_dict = dict(zip(pd.read_excel(mf).iloc[:, 0].str.strip().str.lower(), pd.read_excel(mf).iloc[:, 1].str.strip()))
                     server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(mu.strip(), mp.strip().replace(" ",""))
@@ -238,75 +241,75 @@ elif page == "Upcoming Alerts 🔔":
                         if target_email:
                             msg = MIMEMultipart(); msg['Subject'] = f"Friendly Reminder - {row['company']}"; msg['To'] = target_email
                             msg.attach(MIMEText(f"Dear {row['company']}, payment for ${row['balance']:,.2f} is due in 7 days ({row['due_date']}).", 'plain'))
-                            server.send_message(msg); add_log_entry(row['id'], "Sent T-7 proactive reminder.")
+                            server.send_message(msg); add_log_entry(row['id'], "Sent proactive T-7 reminder.")
                     server.quit(); st.success("Pulse reminders sent!"); st.rerun()
 
-# --- PAGE 4: COLLECTIONS CONTROL (BATCH & FILTERS RESTORED!) ---
+# --- PAGE 4: COLLECTIONS CONTROL (Full Batch + Filters) ---
 elif page == "Collections Control 🔍":
-    st.title("Operations Control")
+    st.title("Operations & Audit Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         cf1, cf2 = st.columns(2)
         c_sel = cf1.multiselect("Search Companies", sorted(df_raw['company'].unique()))
-        c_due = cf2.date_input("Filter Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        c_due = cf2.date_input("Filter Dates", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
         if isinstance(c_due, tuple) and len(c_due) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
         
         st.dataframe(f_df[['id', 'company', 'date_sent_str', 'due_date', 'amount', 'received_amount', 'status']]
-                     .style.applymap(lambda x: 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;' if x=='Overdue' else '', subset=['status']), use_container_width=True, hide_index=True)
+                     .style.applymap(lambda x: 'background-color: #2d1b24; color: #f7567c; font-weight: bold;' if x=='Overdue' else '', subset=['status']), use_container_width=True, hide_index=True)
         
-        st.divider(); st.subheader("Audit & History (Log Restored!)")
+        st.divider(); st.subheader("Audit Documentation (Full Log)")
         f_sorted = f_df.sort_values(by=['due_date_obj', 'company'])
         opts = f_sorted.apply(lambda r: f"[{r['due_date']}] - {r['company']} (${r['amount']:,.0f})", axis=1).tolist()
         opt_to_id = dict(zip(opts, f_sorted['id'].tolist()))
-        sel_l = st.selectbox("Select Record:", opts)
+        sel_l = st.selectbox("Select Record for Audit:", opts)
         if sel_l:
             sid = opt_to_id[sel_l]; row_data = df_raw[df_raw['id'] == sid].iloc[0]
             if str(row_data['notes']) != 'None':
                 for line in str(row_data['notes']).split('\n'): st.markdown(f"<div class='log-box'>{line}</div>", unsafe_allow_html=True)
             ci1, ci2, ci3 = st.columns([2, 1, 1])
             with ci1: ent = st.text_input("New Note Entry:")
-            with ci2: rec = st.number_input("Received:", value=float(row_data['received_amount']), key=f"rec_{sid}")
+            with ci2: rec = st.number_input("Received Amount ($):", value=float(row_data['received_amount']), key=f"rec_{sid}")
             with ci3: nst = st.selectbox("Status:", ["Sent", "Paid", "Overdue", "In Dispute", "Sent Reminder"], index=["Sent", "Paid", "Overdue", "In Dispute", "Sent Reminder"].index(row_data['status']), key=f"st_{sid}")
-            if st.button("Save Documentation"):
+            if st.button("UPDATE RECORD"):
                 if ent: add_log_entry(sid, ent)
                 f_st = "Paid" if rec >= row_data['amount'] else nst
                 supabase.table("billing_history").update({"status": f_st, "received_amount": float(rec)}).eq("id", sid).execute()
-                add_log_entry(sid, f"Manual: {f_st} | ${rec:,.0f}"); st.success("Updated."); time.sleep(0.5); st.rerun()
+                add_log_entry(sid, f"Update: {f_st} | ${rec:,.0f}"); st.success("Updated."); time.sleep(0.5); st.rerun()
 
-        st.divider(); st.subheader("⚡ Batch Execute Launch (Multi-Edit RESTORED!)")
+        st.divider(); st.subheader("⚡ Batch Execute Launch (Multi-Edit)")
         bulk = f_sorted[['id', 'company', 'due_date', 'amount', 'received_amount']].copy()
         bulk['Select'] = False
-        sel_bulk = st.data_editor(bulk[['Select', 'company', 'due_date', 'amount', 'received_amount', 'id']], column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None}, disabled=['company', 'due_date', 'amount'], hide_index=True, use_container_width=True)
-        if st.button("🚀 Execute Batch Update"):
+        sel_bulk = st.data_editor(bulk[['Select', 'company', 'due_date', 'amount', 'received_amount', 'id']], column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None}, hide_index=True, use_container_width=True)
+        if st.button("🚀 EXECUTE BATCH UPDATE"):
             for i, row in sel_bulk[sel_bulk['Select']].iterrows():
                 f_rec = row['received_amount'] if row['received_amount'] > 0 else row['amount']
                 f_st = "Paid" if f_rec >= row['amount'] else "Sent"
                 supabase.table("billing_history").update({"status": f_st, "received_amount": f_rec}).eq("id", row['id']).execute()
-                add_log_entry(row['id'], f"Batch Update: {f_st}"); st.success("Batch done."); time.sleep(1); st.rerun()
+                add_log_entry(row['id'], f"Batch Update: {f_st}"); st.success("Batch Complete."); time.sleep(1); st.rerun()
 
-# --- PAGE 5: REMINDERS MANAGER ---
+# --- PAGE 5: REMINDERS MANAGER (Debt Recovery) ---
 elif page == "Reminders Manager 🚨":
     st.title("Debt Recovery Board")
-    mf = st.file_uploader("Upload Emails", type=['xlsx'])
+    mf = st.file_uploader("Upload Mailing List", type=['xlsx'])
     df_raw = get_cloud_history()
     if not df_raw.empty:
         df_raw['balance'] = df_raw['amount'] - df_raw['received_amount']
         unpaid = df_raw[df_raw['balance'] > 0].copy()
-        if unpaid.empty: st.success("All clear!")
+        if unpaid.empty: st.success("All debts cleared!")
         else:
             unpaid['Select'] = False
             sel_d = st.data_editor(unpaid[['Select', 'company', 'due_date', 'balance', 'id']], hide_index=True, use_container_width=True)
-            d1, d2 = st.columns(2); mu = d1.text_input("Gmail Account"); mp = d2.text_input("Password", type="password")
-            if st.button("🚀 Send Recovery Alerts"):
+            d1, d2 = st.columns(2); mu = d1.text_input("Gmail Account"); mp = d2.text_input("Pass", type="password")
+            if st.button("🚀 SEND RECOVERY ALERTS"):
                 if not sel_d[sel_d['Select']].empty and mf:
                     em_dict = dict(zip(pd.read_excel(mf).iloc[:, 0].str.strip().str.lower(), pd.read_excel(mf).iloc[:, 1].str.strip()))
                     server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(mu.strip(), mp.strip().replace(" ",""))
                     for i, row in sel_d[sel_d['Select']].iterrows():
                         target = em_dict.get(str(row['company']).strip().lower())
                         if target:
-                            msg = MIMEMultipart(); msg['Subject'] = f"URGENT: Debt - {row['company']}"; msg['To'] = target
+                            msg = MIMEMultipart(); msg['Subject'] = f"URGENT: Outstanding Debt - {row['company']}"; msg['To'] = target
                             msg.attach(MIMEText(f"Dear {row['company']}, you have a debt of ${row['balance']:,.2f}.", 'plain'))
-                            server.send_message(msg); add_log_entry(row['id'], f"Recovery Alert to {target}"); supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
+                            server.send_message(msg); add_log_entry(row['id'], f"Recovery Alert sent to {target}"); supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
                     server.quit(); st.balloons(); st.rerun()
