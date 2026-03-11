@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 - עיצוב קומפקטי) ---
+# --- 2. CSS & Design (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { padding-top: 0rem; }
@@ -113,9 +113,6 @@ if page == "Email Sender":
     st.write("---")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
     
-    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
-        st.markdown('<div class="rtl-guide">גוגל דורשת סיסמה בת 16 תווים: 1. כנס לחשבון גוגל > Security. 2. הפעל אימות דו-שלבי. 3. צור App password ל-Mail.</div>', unsafe_allow_html=True)
-
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
         else:
@@ -143,14 +140,13 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 גרף השוואה ועיצוב צפוף) ---
+# --- PAGE 2: ANALYTICS (📊 גרף עמודות אחת לצד השנייה) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         st.write(f"🕒 **Last Sent:** {df_raw['date'].iloc[0]}")
         
-        # פילטרים בשורה אחת
         f1, f2, f3 = st.columns(3)
         sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
         send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
@@ -163,23 +159,21 @@ elif page == "Analytics Dashboard":
         if isinstance(due_range, tuple) and len(due_range) == 2:
             df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
 
-        # מדדים קרובים
         m1, m2, m3 = st.columns(3)
         tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
         m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.write("---")
         
-        # גרף השוואת גבייה (Target vs Actual)
         st.write("### 📉 Billed vs. Received (by Due Date)")
-        chart_billed = df.groupby('due_date')['amount'].sum().rename('Billed (Sent)')
-        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().rename('Received (Paid)')
+        # הכנת נתונים לגרף: אחת לצד השנייה
+        chart_billed = df.groupby('due_date')['amount'].sum().rename('Billed (Navy)')
+        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().rename('Received (Sky)')
         final_chart_df = pd.concat([chart_billed, chart_paid], axis=1).fillna(0)
         
-        # צבעים: כחול כהה לתקציב, תכלת לתשלום
-        st.bar_chart(final_chart_df, color=["#003366", "#87CEEB"])
+        # שימוש ב-st.bar_chart עם stack=False להצגה אחת לצד השנייה
+        st.bar_chart(final_chart_df, color=["#003366", "#87CEEB"], stack=False)
 
-        # פיבוטים בשורה אחת לצמצום מקום
         p1, p2 = st.columns(2)
         with p1:
             st.write("**By Company & Status**")
@@ -191,7 +185,7 @@ elif page == "Analytics Dashboard":
             st.dataframe(pivot_forecast.style.format("${:,.2f}"), use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 לוח בקרה) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
