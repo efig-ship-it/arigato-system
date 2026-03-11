@@ -18,15 +18,18 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
+# --- 2. CSS & Design (🎨 סעיף 7 - עיצוב קומפקטי) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
+    .main { padding-top: 0rem; }
+    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
     .due-date-label { font-size: 14px; font-weight: bold; color: #31333F; margin-bottom: 2px; }
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; line-height: 1; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
-    .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 30px 0; }
+    .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; }
     .rtl-guide { text-align: right; direction: rtl; }
+    div[data-testid="metric-container"] { padding: 5px 10px; border: 1px solid #f0f2f6; border-radius: 10px; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -79,9 +82,8 @@ page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Colle
 # --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
-    st.subheader("1. Setup & Files")
     c1, c2 = st.columns([2, 1])
-    with c1: up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'], label_visibility="collapsed")
+    with c1: up_ex = st.file_uploader("Mailing List (Excel)", type=['xlsx'])
     with c2:
         st.markdown('<div class="due-date-container"><p class="due-date-label">Due Date</p></div>', unsafe_allow_html=True)
         mc, yc = st.columns(2)
@@ -109,7 +111,6 @@ if page == "Email Sender":
         except: pass
 
     st.write("---")
-    st.subheader("2. Sender Details")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
     
     with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
@@ -142,22 +143,18 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 דשבורד עם פיבוטים משופרים) ---
+# --- PAGE 2: ANALYTICS (📊 גרף השוואה ועיצוב צפוף) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        st.info(f"🕒 **Last Invoices Sent On:** {df_raw['date'].iloc[0]}")
+        st.write(f"🕒 **Last Sent:** {df_raw['date'].iloc[0]}")
         
-        st.write("### 🔍 Dashboard Filters")
-        df1, df2, df3 = st.columns(3)
-        with df1: sel_comps = st.multiselect("Companies", sorted(df_raw['company'].unique()))
-        with df2:
-            min_s, max_s = df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()
-            send_range = st.date_input("Send Date Range", value=(min_s, max_s))
-        with df3:
-            min_d, max_d = df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()
-            due_range = st.date_input("Due Date Range", value=(min_d, max_d))
+        # פילטרים בשורה אחת
+        f1, f2, f3 = st.columns(3)
+        sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
+        send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         
         df = df_raw.copy()
         if sel_comps: df = df[df['company'].isin(sel_comps)]
@@ -166,36 +163,32 @@ elif page == "Analytics Dashboard":
         if isinstance(due_range, tuple) and len(due_range) == 2:
             df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
 
+        # מדדים קרובים
         m1, m2, m3 = st.columns(3)
         tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
-        m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Total Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
+        m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
-        st.divider()
+        st.write("---")
         
-        # פיבוט 1: גבייה לפי חברה ותאריכים
-        st.write("### 🏢 Collection Overview (Sent vs. Paid)")
-        pivot_collection = df.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
-        # הבטחת קיום עמודות Sent ו-Paid לצורך חישוב
-        for col in ['Sent', 'Paid']:
-            if col not in pivot_collection.columns: pivot_collection[col] = 0
-        pivot_collection['Total Billed'] = pivot_collection.sum(axis=1)
-        st.dataframe(pivot_collection.style.format("${:,.2f}"), use_container_width=True)
+        # גרף השוואת גבייה (Target vs Actual)
+        st.write("### 📉 Billed vs. Received (by Due Date)")
+        chart_billed = df.groupby('due_date')['amount'].sum().rename('Billed (Sent)')
+        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().rename('Received (Paid)')
+        final_chart_df = pd.concat([chart_billed, chart_paid], axis=1).fillna(0)
+        
+        # צבעים: כחול כהה לתקציב, תכלת לתשלום
+        st.bar_chart(final_chart_df, color=["#003366", "#87CEEB"])
 
-        st.divider()
-        
-        # פיבוט 2: תחזית תזרים לפי Due Date
-        st.write("### 📅 Cash Flow Forecast (By Due Date)")
-        pivot_forecast = df.pivot_table(index='due_date', columns='status', values='amount', aggfunc='sum', fill_value=0)
-        st.dataframe(pivot_forecast.style.format("${:,.2f}"), use_container_width=True)
-
-        st.divider()
-        st.write("### ⚡ Payment Performance (Avg. Days to Pay)")
-        speed_df = df[df['days_to_pay'].notna()]
-        if not speed_df.empty:
-            avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
-            st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
-        else: st.write("Waiting for more payment data...")
-        
+        # פיבוטים בשורה אחת לצמצום מקום
+        p1, p2 = st.columns(2)
+        with p1:
+            st.write("**By Company & Status**")
+            pivot_comp = df.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
+        with p2:
+            st.write("**Cash Flow (Due Date)**")
+            pivot_forecast = df.pivot_table(index='due_date', columns='status', values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_forecast.style.format("${:,.2f}"), use_container_width=True)
     else: st.info("No data.")
 
 # --- PAGE 3: CONTROL (🔍 לוח בקרה) ---
@@ -203,15 +196,10 @@ elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        st.write("### 🔍 Control Filters")
         cf1, cf2, cf3 = st.columns(3)
-        with cf1: c_sel_comps = st.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
-        with cf2:
-            min_s, max_s = df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()
-            c_send_range = st.date_input("Filter Send Date", value=(min_s, max_s))
-        with cf3:
-            min_d, max_d = df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()
-            c_due_range = st.date_input("Filter Due Date", value=(min_d, max_d))
+        c_sel_comps = cf1.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
+        c_send_range = cf2.date_input("Filter Send Date", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        c_due_range = cf3.date_input("Filter Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         
         f_df = df_raw.copy()
         if c_sel_comps: f_df = f_df[f_df['company'].isin(c_sel_comps)]
@@ -228,7 +216,7 @@ elif page == "Collections Control 🔍":
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
         
-        with st.expander("📋 Manage Billing Records", expanded=True):
+        with st.expander("📋 Billing Records", expanded=True):
             if not edit_mode:
                 st.dataframe(f_df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
