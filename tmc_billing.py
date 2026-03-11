@@ -19,7 +19,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. UI CSS ---
+# --- 2. UI CSS (Tuesday Style) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="wide")
 st.markdown("""<style>
     .main { background-color: #f4f7f9; }
@@ -221,7 +221,7 @@ elif page == "Upcoming Alerts 🔔":
     final_up = pd.concat([upcoming_real, test_data]) if not upcoming_real.empty else test_data
     final_up['Select'] = False
     sel = st.data_editor(final_up[['Select', 'company', 'due_date', 'balance', 'id']], hide_index=True, use_container_width=True)
-    mf = st.file_uploader("Upload Emails for Lookup", type=['xlsx'])
+    mf = st.file_uploader("Upload Mailing List for Lookup", type=['xlsx'])
     d1, d2 = st.columns(2); mu = d1.text_input("Gmail"); mp = d2.text_input("Pass", type="password")
     if st.button("🚀 Send Proactive Reminders"):
         selected = sel[sel['Select'] == True]
@@ -234,7 +234,7 @@ elif page == "Upcoming Alerts 🔔":
                 if row['id'] < 9000: add_log_entry(row['id'], "Sent T-7 proactive reminder.")
             server.quit(); st.success("Pulse reminders sent!"); st.rerun()
 
-# --- PAGE 4: COLLECTIONS CONTROL ---
+# --- PAGE 4: COLLECTIONS CONTROL (WITH COLOR CODING) ---
 elif page == "Collections Control 🔍":
     st.title("Operations Control")
     df_raw = get_cloud_history()
@@ -245,7 +245,16 @@ elif page == "Collections Control 🔍":
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
         if isinstance(c_due, tuple) and len(c_due) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
-        st.dataframe(f_df[['id', 'company', 'date_sent_str', 'due_date', 'amount', 'received_amount', 'status']].style.applymap(lambda x: 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;' if x=='Overdue' else '', subset=['status']), use_container_width=True, hide_index=True)
+        
+        # --- צביעת סטטוסים (Highlight Logic) ---
+        def highlight_st(val):
+            if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
+            if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold; border: 1px solid #e53e3e;'
+            if val == 'Sent Reminder': return 'background-color: #fefcbf; color: #744210; font-weight: bold;'
+            return ''
+            
+        st.dataframe(f_df[['id', 'company', 'date_sent_str', 'due_date', 'amount', 'received_amount', 'status']]
+                     .style.applymap(highlight_st, subset=['status']), use_container_width=True, hide_index=True)
         
         st.divider(); st.subheader("Audit & Documentation")
         f_sorted = f_df.sort_values(by=['due_date_obj', 'company'])
@@ -289,15 +298,17 @@ elif page == "Reminders Manager 🚨":
         else:
             unpaid['Select'] = False
             sel_d = st.data_editor(unpaid[['Select', 'company', 'due_date', 'balance', 'id']], hide_index=True, use_container_width=True)
-            d1, d2 = st.columns(2); mu = d1.text_input("Gmail"); mp = d2.text_input("Password", type="password")
+            d1, d2 = st.columns(2); mu = d1.text_input("Gmail Account"); mp = d2.text_input("Password", type="password")
             if st.button("🚀 Send Recovery Alerts"):
                 if not sel_d[sel_d['Select']].empty and mf:
-                    em_dict = dict(zip(pd.read_excel(mf).iloc[:, 0].str.strip().str.lower(), pd.read_excel(mf).iloc[:, 1].str.strip()))
-                    server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(mu.strip(), mp.strip().replace(" ",""))
-                    for i, row in sel_d[sel_d['Select']].iterrows():
-                        target = em_dict.get(str(row['company']).strip().lower())
-                        if target:
-                            msg = MIMEMultipart(); msg['Subject'] = f"URGENT: Debt - {row['company']}"; msg['To'] = target
-                            msg.attach(MIMEText(f"Dear {row['company']}, you have a debt of ${row['balance']:,.2f}.", 'plain'))
-                            server.send_message(msg); add_log_entry(row['id'], f"Recovery Alert to {target}"); supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
-                    server.quit(); st.balloons(); st.rerun()
+                    try:
+                        em_dict = dict(zip(pd.read_excel(mf).iloc[:, 0].str.strip().str.lower(), pd.read_excel(mf).iloc[:, 1].str.strip()))
+                        server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(mu.strip(), mp.strip().replace(" ",""))
+                        for i, row in sel_d[sel_d['Select']].iterrows():
+                            target = em_dict.get(str(row['company']).strip().lower())
+                            if target:
+                                msg = MIMEMultipart(); msg['Subject'] = f"URGENT: Debt - {row['company']}"; msg['To'] = target
+                                msg.attach(MIMEText(f"Dear {row['company']}, you have a debt of ${row['balance']:,.2f}.", 'plain'))
+                                server.send_message(msg); add_log_entry(row['id'], f"Recovery Alert to {target}"); supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
+                        server.quit(); st.balloons(); st.rerun()
+                    except Exception as e: st.error(f"Error: {e}")
