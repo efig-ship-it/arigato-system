@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7) ---
+# --- 2. CSS & Design (🎨 סעיף 7 + נספח יישור לימין) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .due-date-container { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; margin-bottom: 5px; }
@@ -29,21 +29,21 @@ st.markdown("""<style>
     .rtl-guide { text-align: right; direction: rtl; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions ---
+# --- 3. Helper Functions (🛡️ סעיף 1 + 3) ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
         response = supabase.table("billing_history").select("*").order("id", desc=True).execute()
         df = pd.DataFrame(response.data)
         if not df.empty:
-            # ניקוי תאריכים אגרסיבי למניעת שגיאת TypeError
-            df['date_sent'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
-            df = df.dropna(subset=['date_sent']) # מסיר שורות עם תאריך לא תקין
-            df['date_obj'] = df['date_sent'].dt.date
+            df['date_sent_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+            df = df.dropna(subset=['date_sent_dt'])
+            df['date_sent_obj'] = df['date_sent_dt'].dt.date
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
-            df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
-            df['month_year'] = df['date_sent'].dt.strftime('%Y-%m')
+            df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
+            df['due_date_obj'] = df['due_date_dt'].dt.date
             
+            # לוגיקת מהירות תשלום (סעיף 9)
             def extract_days(note, sent_date):
                 match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
                 if match and not pd.isna(sent_date):
@@ -52,11 +52,9 @@ def get_cloud_history():
                         return (paid_dt - sent_date).days
                     except: return None
                 return None
-            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent']), axis=1)
+            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent_dt']), axis=1)
         return df
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 def clean_amount(val):
     if pd.isna(val) or val == "": return 0.0
@@ -79,7 +77,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER ---
+# --- PAGE 1: EMAIL SENDER (📧 סעיף 4) ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     st.subheader("1. Setup & Files")
@@ -94,6 +92,7 @@ if page == "Email Sender":
     
     uploaded_files = st.file_uploader("Upload Company Invoices", accept_multiple_files=True)
 
+    # מנגנון הבלש (סעיף 2)
     allow_sending = True
     if up_ex and uploaded_files:
         try:
@@ -114,6 +113,9 @@ if page == "Email Sender":
     st.write("---")
     st.subheader("2. Sender Details")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
+    
+    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
+        st.markdown('<div class="rtl-guide">גוגל דורשת סיסמה בת 16 תווים: 1. כנס לחשבון גוגל > Security. 2. הפעל אימות דו-שלבי. 3. צור App password ל-Mail.</div>', unsafe_allow_html=True)
 
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
@@ -123,6 +125,7 @@ if page == "Email Sender":
                 server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                 server.login(user_mail.strip(), user_pass.strip().replace(" ", ""))
                 with st.spinner(""):
+                    # אנימציית כבודה (נספח מרץ 2026)
                     st.markdown("""<div class="suitcase-container"><svg width="50" height="50" viewBox="0 0 24 24" fill="#8B4513" xmlns="http://www.w3.org/2000/svg">
                         <path d="M17,6H16V5c0-1.1-0.9-2-2-2h-4C8.9,3,8,3.9,8,5v1H7C5.9,6,5,6.9,5,8v11c0,1.1,0.9,2,2,2h10c1.1,0,2-0.9,2-2V8 C19,6.9,18.1,6,17,6z M10,5h4v1h-4V5z M17,19H7V8h10V19z"/></svg>
                         <p style='color: #8B4513;'>Invoices are traveling...</p></div>""", unsafe_allow_html=True)
@@ -139,94 +142,110 @@ if page == "Email Sender":
                             it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
                             due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
                             supabase.table("billing_history").insert({"date": it, "company": company, "amount": total_amt, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
-                server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
+                server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 Dashboard עם תיקון שגיאת תאריכים) ---
+# --- PAGE 2: ANALYTICS (📊 סעיף 5 + נספחים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
-    
     if not df_raw.empty:
-        st.write("### 🔍 Filters")
-        f1, f2, f3 = st.columns(3)
-        with f1: sel_comps = st.multiselect("Select Company", options=sorted(df_raw['company'].unique()))
-        with f2: sel_status = st.multiselect("Select Status", options=sorted(df_raw['status'].unique()))
-        with f3: 
-            # הגנה מפני שגיאת Min/Max
-            valid_dates = df_raw['date_obj'].dropna()
-            if not valid_dates.empty:
-                min_d, max_d = valid_dates.min(), valid_dates.max()
-                date_range = st.date_input("Date Range", value=(min_d, max_d))
-            else:
-                date_range = st.date_input("Date Range", value=(date.today(), date.today()))
-
-        df = df_raw.copy()
-        if sel_comps: df = df[df['company'].isin(sel_comps)]
-        if sel_status: df = df[df['status'].isin(sel_status)]
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            df = df[(df['date_obj'] >= date_range[0]) & (df['date_obj'] <= date_range[1])]
-
+        # תאריך שליחה אחרון (נספח)
         st.info(f"🕒 **Last Invoices Sent On:** {df_raw['date'].iloc[0]}")
         
+        st.write("### 🔍 Filters")
+        df1, df2, df3 = st.columns(3)
+        with df1: sel_comps = st.multiselect("Companies", sorted(df_raw['company'].unique()))
+        with df2:
+            min_s, max_s = df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()
+            send_range = st.date_input("Send Date Range", value=(min_s, max_s))
+        with df3:
+            min_d, max_d = df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()
+            due_range = st.date_input("Due Date Range", value=(min_d, max_d))
+        
+        df = df_raw.copy()
+        if sel_comps: df = df[df['company'].isin(sel_comps)]
+        if isinstance(send_range, tuple) and len(send_range) == 2:
+            df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
+        if isinstance(due_range, tuple) and len(due_range) == 2:
+            df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
+
         m1, m2, m3 = st.columns(3)
         tb = df['amount'].sum(); tp = df[df['status'] == 'Paid']['amount'].sum()
-        m1.metric("Billed (Filtered)", f"${tb:,.2f}"); m2.metric("Received (Filtered)", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
+        m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Total Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.divider()
-        st.write("### 🧮 Data Pivots")
+        st.write("### 🧮 Data Pivots (סעיף 5)")
         p1, p2 = st.columns(2)
         with p1:
-            st.write("**Amount by Company & Status**")
-            if not df.empty:
-                pivot_comp = df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0)
-                st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
+            st.write("**Amount by Company & Due Date**")
+            pivot_comp = df.pivot_table(index='company', columns=['due_date'], values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
         with p2:
-            st.write("**Monthly Billing Trend**")
-            if not df.empty:
-                pivot_month = df.pivot_table(index='month_year', values='amount', aggfunc='sum', fill_value=0)
-                st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
-
-        st.divider()
-        st.write("### ⚡ Payment Speed Performance")
-        speed_df = df[df['days_to_pay'].notna()]
-        if not speed_df.empty:
-            avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
-            st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
-        else: st.write("No payment data collected yet.")
+            st.write("**Performance (Days to Pay)**")
+            speed_df = df[df['days_to_pay'].notna()]
+            if not speed_df.empty:
+                avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
+                st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+            else: st.write("Waiting for payment data...")
 
         st.divider()
         st.write("### 📅 Timeline View (Due Date)")
         chart_data = df.groupby('due_date').agg({'amount':'sum'}).reset_index()
         st.bar_chart(data=chart_data, x='due_date', y='amount')
-    else: st.info("No valid records found in cloud history.")
+    else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 Collections Control 🔍) ---
+# --- PAGE 3: CONTROL (🔍 סעיף 6 + נספחים) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
-    df = get_cloud_history()
-    if not df.empty:
+    df_raw = get_cloud_history()
+    if not df_raw.empty:
+        st.write("### 🔍 Control Filters")
+        cf1, cf2, cf3 = st.columns(3)
+        with cf1: c_sel_comps = st.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
+        with cf2:
+            min_s, max_s = df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()
+            c_send_range = st.date_input("Filter Send Date", value=(min_s, max_s))
+        with cf3:
+            min_d, max_d = df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()
+            c_due_range = st.date_input("Filter Due Date", value=(min_d, max_d))
+        
+        f_df = df_raw.copy()
+        if c_sel_comps: f_df = f_df[f_df['company'].isin(c_sel_comps)]
+        if isinstance(c_send_range, tuple) and len(c_send_range) == 2:
+            f_df = f_df[(f_df['date_sent_obj'] >= c_send_range[0]) & (f_df['date_sent_obj'] <= c_send_range[1])]
+        if isinstance(c_due_range, tuple) and len(c_due_range) == 2:
+            f_df = f_df[(f_df['due_date_obj'] >= c_due_range[0]) & (f_df['due_date_obj'] <= c_due_range[1])]
+
+        # צביעה דינמית (נספח)
         def highlight_status(val):
             if val == 'Paid': return 'background-color: #28a745; color: white;'
             if val == 'Overdue': return 'background-color: #d32f2f; color: white;'
             return ''
 
+        # סדר עמודות קבוע מהנספח
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'status', 'notes']
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
         
         with st.expander("📋 Manage Billing Records", expanded=True):
             if not edit_mode:
-                st.dataframe(df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+                st.dataframe(f_df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
-                edited_df = st.data_editor(df[display_cols], column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("amount", format="%,.2f")}, disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
+                # עורך נתונים עם פסיקים (סעיף נספח)
+                edited_df = st.data_editor(f_df[display_cols], 
+                    column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("amount", format="%,.2f")}, 
+                    disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
+                
                 if st.button("💾 Save Changes"):
                     for i, row in edited_df.iterrows():
-                        old_row = df[df['id'] == row['id']].iloc[0]
+                        old_row = df_raw[df_raw['id'] == row['id']].iloc[0]
                         new_notes = str(row.get('notes', '') or '')
+                        # תיעוד אוטומטי (סעיף 8)
                         if row['status'] != old_row['status']:
                             timestamp = datetime.now().strftime("%d/%m/%y")
                             status_tag = f"[Paid on {timestamp}]" if row['status'] == 'Paid' else f"[Status to {row['status']} on {timestamp}]"
                             if status_tag not in new_notes: new_notes = f"{new_notes} {status_tag}".strip()
+                        
                         supabase.table("billing_history").update({"status": row['status'], "notes": new_notes, "amount": float(row['amount'])}).eq("id", row['id']).execute()
                     st.success("Updated!"); time.sleep(0.5); st.rerun()
-    else: st.info("No records found.")
+    else: st.info("No records.")
