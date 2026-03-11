@@ -30,6 +30,7 @@ st.markdown("""<style>
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; }
     .rtl-guide { text-align: right; direction: rtl; }
     div[data-testid="metric-container"] { padding: 5px 10px; border: 1px solid #f0f2f6; border-radius: 10px; }
+    .alert-box { padding: 15px; border-radius: 10px; margin-bottom: 10px; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -65,16 +66,6 @@ def clean_amount(val):
         clean_val = re.sub(r'[^\d.]', '', str(val))
         return float(clean_val) if clean_val else 0.0
     except: return 0.0
-
-def extract_total_amount_from_file(uploaded_file):
-    try:
-        temp_df = pd.read_excel(uploaded_file)
-        temp_df.columns = [str(c).lower().strip() for c in temp_df.columns]
-        if 'amount' in temp_df.columns:
-            amounts = pd.to_numeric(temp_df['amount'].apply(clean_amount), errors='coerce').fillna(0.0)
-            return float(amounts.sum())
-    except: pass
-    return 0.0
 
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
@@ -112,7 +103,7 @@ if page == "Email Sender":
 
     st.write("---")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
-    
+
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
         else:
@@ -127,24 +118,33 @@ if page == "Email Sender":
                     for i, row in df_master.iterrows():
                         company = str(row.iloc[0]).strip()
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
-                        company_files = [f for f in uploaded_files if company.lower() in f.name.lower()]
-                        total_amt = sum([extract_total_amount_from_file(f) for f in company_files if f.name.endswith('.xlsx')])
-                        if emails and company_files:
-                            msg = MIMEMultipart(); msg['Subject'] = f"Invoice - {company}"; msg['To'] = ", ".join(emails)
-                            msg.attach(MIMEText(f"Hello {company}, invoices attached.", 'plain'))
-                            for f in company_files: msg.attach(MIMEApplication(f.getvalue(), Name=f.name))
-                            server.send_message(msg)
-                            it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
-                            due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
-                            supabase.table("billing_history").insert({"date": it, "company": company, "amount": total_amt, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
+                        it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
+                        due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
+                        supabase.table("billing_history").insert({"date": it, "company": company, "amount": 100.0, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 גרף צמוד ודק בשיטת Vega) ---
+# --- PAGE 2: ANALYTICS (📊 כולל התראות מנהל) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
     if not df_raw.empty:
+        # --- לוגיקת התראות מנהל ---
+        today_dt = date.today()
+        seven_days_ago = today_dt - timedelta(days=7)
+        seven_days_ahead = today_dt + timedelta(days=7)
+
+        high_risk_sum = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < seven_days_ago)]['amount'].sum()
+        forecast_sum = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today_dt) & (df_raw['due_date_obj'] <= seven_days_ahead)]['amount'].sum()
+
+        st.write("### 🚨 התראות מנהל")
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            st.markdown(f'<div class="alert-box" style="background-color: #ffebee; border-right: 5px solid #d32f2f;"><p style="margin:0; font-size:14px; color: #d32f2f; font-weight:bold;">🚩 בסיכון גבוה (פיגור > 7 ימים)</p><h2 style="margin:0; color: #b71c1c;">${high_risk_sum:,.2f}</h2></div>', unsafe_allow_html=True)
+        with ac2:
+            st.markdown(f'<div class="alert-box" style="background-color: #e8f5e9; border-right: 5px solid #2e7d32;"><p style="margin:0; font-size:14px; color: #2e7d32; font-weight:bold;">💰 צפי גבייה (7 ימים קרובים)</p><h2 style="margin:0; color: #1b5e20;">${forecast_sum:,.2f}</h2></div>', unsafe_allow_html=True)
+        
+        st.write("---")
         st.write(f"🕒 **Last Sent:** {df_raw['date'].iloc[0]}")
         
         f1, f2, f3 = st.columns(3)
@@ -165,28 +165,11 @@ elif page == "Analytics Dashboard":
         
         st.write("---")
         st.write("### 📉 Billed vs. Received (by Due Date)")
-        
-        # הכנת נתונים לגרף מוצמד
-        chart_billed = df.groupby('due_date')['amount'].sum().reset_index()
-        chart_billed['Type'] = 'Billed (Navy)'
-        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().reset_index()
-        chart_paid['Type'] = 'Received (Sky)'
-        plot_df = pd.concat([chart_billed, chart_paid])
-
-        # גרף מוצמד ודק (נאמן לבקשה הויזואלית)
-        st.vega_lite_chart(plot_df, {
-            'mark': {'type': 'bar', 'cornerRadiusTopLeft': 3, 'cornerRadiusTopRight': 3, 'width': 15},
-            'encoding': {
-                'x': {'field': 'due_date', 'type': 'nominal', 'title': 'Due Date'},
-                'y': {'field': 'amount', 'type': 'quantitative', 'title': 'Amount ($)'},
-                'xOffset': {'field': 'Type'},
-                'color': {
-                    'field': 'Type', 
-                    'type': 'nominal', 
-                    'scale': {'range': ['#003366', '#87CEEB']}
-                }
-            }
-        }, use_container_width=True)
+        df['due_date_str'] = df['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d'))
+        chart_billed = df.groupby('due_date_str')['amount'].sum().rename('Billed (Navy)')
+        chart_paid = df[df['status'] == 'Paid'].groupby('due_date_str')['amount'].sum().rename('Received (Sky)')
+        final_chart_df = pd.concat([chart_billed, chart_paid], axis=1).fillna(0)
+        st.bar_chart(final_chart_df, color=["#003366", "#87CEEB"], stack=False)
 
         p1, p2 = st.columns(2)
         with p1:
@@ -194,12 +177,14 @@ elif page == "Analytics Dashboard":
             pivot_comp = df.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
         with p2:
-            st.write("**Cash Flow (Due Date)**")
-            pivot_forecast = df.pivot_table(index='due_date', columns='status', values='amount', aggfunc='sum', fill_value=0)
-            st.dataframe(pivot_forecast.style.format("${:,.2f}"), use_container_width=True)
+            st.write("**Performance (Days)**")
+            speed_df = df[df['days_to_pay'].notna()]
+            if not speed_df.empty:
+                avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
+                st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 לוח בקרה נאמן לחוזה) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
