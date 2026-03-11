@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 + נספחים) ---
+# --- 2. CSS & Design (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { padding-top: 0rem; }
@@ -46,6 +46,7 @@ def get_cloud_history():
             df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
             df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
             df['due_date_obj'] = df['due_date_dt'].dt.date
+            df['month_sent'] = df['date_sent_dt'].dt.strftime('%b %Y')
             
             def extract_days(note, sent_date):
                 match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
@@ -80,7 +81,7 @@ def extract_total_amount_from_file(uploaded_file):
 # --- 4. Navigation ---
 page = st.sidebar.radio("Go to:", ["Email Sender", "Analytics Dashboard", "Collections Control 🔍"])
 
-# --- PAGE 1: EMAIL SENDER (📧 סעיפים 2, 3, 4) ---
+# --- PAGE 1: EMAIL SENDER ---
 if page == "Email Sender":
     st.title("TMC Billing System")
     c1, c2 = st.columns([2, 1])
@@ -114,9 +115,6 @@ if page == "Email Sender":
     st.write("---")
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Address"); user_pass = sc2.text_input("App Password", type="password")
     
-    with st.expander("🔑 מדריך ליצירת סיסמת אפליקציה"):
-        st.markdown('<div class="rtl-guide">גוגל דורשת סיסמה בת 16 תווים: 1. כנס לחשבון גוגל > Security. 2. הפעל אימות דו-שלבי. 3. צור App password ל-Mail.</div>', unsafe_allow_html=True)
-
     if st.button("🚀 Start Bulk Sending", use_container_width=True, disabled=not allow_sending):
         if not up_ex or not user_mail: st.error("Missing credentials.")
         else:
@@ -151,7 +149,7 @@ if page == "Email Sender":
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 סעיפים 5, 9 והתראות מנהל) ---
+# --- PAGE 2: ANALYTICS (📊 הפיבוטים המשודרגים) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
@@ -186,39 +184,44 @@ elif page == "Analytics Dashboard":
         m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.divider()
-        st.write("### 📉 Billed vs. Received (by Due Date)")
-        chart_billed = df.groupby('due_date')['amount'].sum().reset_index()
-        chart_billed['Type'] = 'Billed (Navy)'
-        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().reset_index()
-        chart_paid['Type'] = 'Received (Sky)'
-        plot_df = pd.concat([chart_billed, chart_paid])
-
-        st.vega_lite_chart(plot_df, {
-            'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 2, 'cornerRadiusTopRight': 2},
-            'encoding': {
-                'x': {'field': 'due_date', 'type': 'nominal', 'title': 'Due Date'},
-                'y': {'field': 'amount', 'type': 'quantitative', 'title': 'Amount ($)'},
-                'xOffset': {'field': 'Type'},
-                'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}
-            }
-        }, use_container_width=True)
-
-        st.divider()
         st.write("### 🧮 Data Pivots")
+        
+        # פיבוט 1 ו-2 (בשורה אחת)
         p1, p2 = st.columns(2)
         with p1:
             st.write("**Sent vs. Paid (by Company)**")
             pivot_comp = df.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
         with p2:
-            st.write("**Payment Performance (Avg. Days)**")
+            st.write("**Outstanding Debt (Money Owed)**")
+            debt_df = df[df['status'] != 'Paid']
+            if not debt_df.empty:
+                pivot_debt = debt_df.pivot_table(index='company', values='amount', aggfunc='sum')
+                st.dataframe(pivot_debt.style.format("${:,.2f}"), use_container_width=True)
+            else: st.write("✅ All bills paid!")
+
+        # פיבוט 3 ו-4 (בשורה אחת)
+        p3, p4 = st.columns(2)
+        with p3:
+            st.write("**Monthly Billing Summary**")
+            pivot_month = df.pivot_table(index='month_sent', values='amount', aggfunc='sum')
+            st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
+        with p4:
+            st.write("**Performance (Avg. Days to Pay)**")
             speed_df = df[df['days_to_pay'].notna()]
             if not speed_df.empty:
                 avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
                 st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+
+        st.write("### 📉 Billed vs. Received (Timeline)")
+        df_for_chart = df.copy()
+        df_for_chart['due_date_str'] = df_for_chart['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d'))
+        chart_billed = df_for_chart.groupby('due_date_str')['amount'].sum().rename('Billed')
+        chart_paid = df_for_chart[df_for_chart['status'] == 'Paid'].groupby('due_date_str')['amount'].sum().rename('Received')
+        st.bar_chart(pd.concat([chart_billed, chart_paid], axis=1).fillna(0), color=["#003366", "#87CEEB"], stack=False)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיף 6 + נספחים) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
