@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. Enhanced UI CSS (Nuvei Style) ---
+# --- 2. UI CSS (Nuvei Soft Style) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { background-color: #f4f7f9; }
@@ -29,13 +29,14 @@ st.markdown("""<style>
     h1 { color: #1a202c; font-weight: 800; margin-bottom: 30px; }
     .alert-box { border-right: 6px solid #003366; margin-bottom: 25px; }
     .alert-box h2 { font-size: 38px; margin: 0; color: #1a202c; }
+    .alert-box p { font-size: 13px; color: #718096; text-transform: uppercase; font-weight: 600; margin-bottom: 5px; }
     .log-box { background-color: #ffffff; padding: 12px; border-radius: 6px; border: 1px solid #e0e4e8; border-right: 4px solid #003366; margin-bottom: 8px; font-size: 13px; direction: rtl; }
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; display: block; }
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 40px 0; text-align: center; }
     .big-detective { font-size: 350px; text-align: center; margin: 20px 0; display: block; }
 </style>""", unsafe_allow_html=True)
 
-# --- 3. Helper Functions (Alice Logic Included) ---
+# --- 3. Helper Functions ---
 def get_cloud_history():
     if not supabase: return pd.DataFrame()
     try:
@@ -145,7 +146,7 @@ if page == "Email Sender 📧":
                 server.quit(); placeholder.empty(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", autoplay=True); time.sleep(3); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS ---
+# --- PAGE 2: ANALYTICS (📊 נוסף מדד Reminded Total) ---
 elif page == "Analytics Dashboard 📊":
     st.title("Financial Overview")
     df_raw = get_cloud_history()
@@ -153,16 +154,33 @@ elif page == "Analytics Dashboard 📊":
         today = date.today()
         risk = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < today - timedelta(days=7))]['amount'].sum()
         forecast = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
+        
         c1, c2 = st.columns(2)
         c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e;"><p>Critical Overdue</p><h2>${risk:,.2f}</h2></div>', unsafe_allow_html=True)
         c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169;"><p>Expected (Next 7d)</p><h2>${forecast:,.2f}</h2></div>', unsafe_allow_html=True)
-        st.divider(); f1, f2, f3 = st.columns(3)
+
+        st.divider(); st.subheader("Global Filters")
+        f1, f2, f3 = st.columns(3)
         sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
+        send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        
         df = df_raw.copy()
         if sel_comps: df = df[df['company'].isin(sel_comps)]
-        m1, m2, m3 = st.columns(3)
+        if isinstance(send_range, tuple) and len(send_range) == 2: df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
+        if isinstance(due_range, tuple) and len(due_range) == 2: df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
+
+        st.write("### Key Metrics")
+        m1, m2, m3, m4 = st.columns(4)
         tb, tr = df['amount'].sum(), df['received_amount'].sum()
-        m1.metric("Billed Total", f"${tb:,.2f}"); m2.metric("Received Total", f"${tr:,.2f}"); m3.metric("Outstanding", f"${tb-tr:,.2f}")
+        # חישוב סכום שנמצא בסטטוס תזכורת
+        rem_total = df[df['status'] == 'Sent Reminder']['balance'].sum()
+        
+        m1.metric("Billed Total", f"${tb:,.2f}")
+        m2.metric("Received Total", f"${tr:,.2f}")
+        m3.metric("Outstanding", f"${tb-tr:,.2f}")
+        m4.metric("Reminded Total", f"${rem_total:,.2f}") # ה-KEY החדש שביקשת
+        
         st.divider(); p1, p2 = st.columns(2)
         with p1:
             st.write("**By Company**")
@@ -171,6 +189,10 @@ elif page == "Analytics Dashboard 📊":
             st.write("**Payment Speed**")
             speed = df[df['days_to_pay'].notna()]
             if not speed.empty: st.dataframe(speed.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+
+        st.write("**Monthly Summary**")
+        st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.2f}"), use_container_width=True)
+
         st.write("### 📉 Efficiency Chart")
         c_billed = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
         c_paid = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
@@ -183,8 +205,8 @@ elif page == "Collections Control 🔍":
     df_raw = get_cloud_history()
     if not df_raw.empty:
         cf1, cf2 = st.columns(2)
-        c_sel = cf1.multiselect("Companies", sorted(df_raw['company'].unique()))
-        c_due = cf2.date_input("Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        c_sel = cf1.multiselect("Companies Search", sorted(df_raw['company'].unique()))
+        c_due = cf2.date_input("Due Date Filter", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
         if isinstance(c_due, tuple) and len(c_due) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
@@ -235,7 +257,6 @@ elif page == "Collections Control 🔍":
 # --- PAGE 4: REMINDERS MANAGER 🚨 ---
 elif page == "Reminders Manager 🚨":
     st.title("Reminders Manager")
-    st.markdown("ניהול חריגות ושליחת תזכורות מותאמות אישית.")
     mail_file = st.file_uploader("Upload Company Email List (Excel)", type=['xlsx'])
     df_raw = get_cloud_history()
     if not df_raw.empty:
