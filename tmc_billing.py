@@ -119,12 +119,11 @@ if page == "Email Sender":
                         emails = [e.strip() for e in str(row.iloc[1]).split(',') if '@' in e]
                         it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
                         due_val = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
-                        # כאן יש לוגיקת שליחה...
                         supabase.table("billing_history").insert({"date": it, "company": company, "amount": 100.0, "status": "Sent", "currency": "$", "due_date": due_val, "sender": user_mail}).execute()
                 server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); time.sleep(3); st.rerun()
             except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 גרף עמודות צמודות) ---
+# --- PAGE 2: ANALYTICS (📊 גרף מוצמד ודק) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
@@ -148,19 +147,33 @@ elif page == "Analytics Dashboard":
         m1.metric("Total Billed", f"${tb:,.2f}"); m2.metric("Received", f"${tp:,.2f}"); m3.metric("Outstanding", f"${tb-tp:,.2f}")
         
         st.write("---")
-        
         st.write("### 📉 Billed vs. Received (by Due Date)")
-        # יצירת הנתונים לגרף עם המרה לפורמט תאריך נקי
-        df['due_date_str'] = df['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d'))
-        chart_billed = df.groupby('due_date_str')['amount'].sum().rename('Billed (Navy)')
-        chart_paid = df[df['status'] == 'Paid'].groupby('due_date_str')['amount'].sum().rename('Received (Sky)')
         
-        final_chart_df = pd.concat([chart_billed, chart_paid], axis=1).fillna(0)
-        
-        # הצגת הגרף: הצמוד והדק
-        st.bar_chart(final_chart_df, color=["#003366", "#87CEEB"], stack=False)
+        # הכנת נתונים לגרף מוצמד (Grouped Bar Chart)
+        chart_billed = df.groupby('due_date')['amount'].sum().reset_index()
+        chart_billed['Type'] = 'Billed (Navy)'
+        chart_paid = df[df['status'] == 'Paid'].groupby('due_date')['amount'].sum().reset_index()
+        chart_paid['Type'] = 'Received (Sky)'
+        plot_df = pd.concat([chart_billed, chart_paid])
 
-        # טבלאות פיבוט לצמצום מקום
+        # גרף מוצמד ודק בשיטת Vega-Lite (Native to Streamlit)
+        st.vega_lite_chart(plot_df, {
+            'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 2, 'cornerRadiusTopRight': 2},
+            'encoding': {
+                'x': {'field': 'due_date', 'type': 'nominal', 'title': 'Due Date'},
+                'y': {'field': 'amount', 'type': 'quantitative', 'title': 'Amount ($)'},
+                'xOffset': {'field': 'Type'},
+                'color': {
+                    'field': 'Type', 
+                    'type': 'nominal', 
+                    'scale': {'range': ['#003366', '#87CEEB']}
+                }
+            },
+            'config': {
+                'view': {'stroke': 'transparent'}
+            }
+        }, use_container_width=True)
+
         p1, p2 = st.columns(2)
         with p1:
             st.write("**By Company & Status**")
@@ -168,7 +181,7 @@ elif page == "Analytics Dashboard":
             st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
         with p2:
             st.write("**Cash Flow (Due Date)**")
-            pivot_forecast = df.pivot_table(index='due_date_str', columns='status', values='amount', aggfunc='sum', fill_value=0)
+            pivot_forecast = df.pivot_table(index='due_date', columns='status', values='amount', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_forecast.style.format("${:,.2f}"), use_container_width=True)
     else: st.info("No data.")
 
