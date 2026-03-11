@@ -142,7 +142,7 @@ if page == "Email Sender":
             server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", format="audio/mp3", autoplay=True); time.sleep(2); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 פילטרים + 3 פיבוטים + גרף צמוד) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df_raw = get_cloud_history()
@@ -174,24 +174,22 @@ elif page == "Analytics Dashboard":
         st.divider(); st.write("### 🧮 Data Pivots")
         p1, p2 = st.columns(2)
         with p1:
-            st.write("**Sent vs. Paid (by Company)**")
-            pivot_comp = df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0)
-            st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
+            st.write("**Billed by Company**")
+            st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.2f}"), use_container_width=True)
         with p2:
-            st.write("**Payment Speed (Avg. Days)**")
+            st.write("**Payment Performance**")
             speed = df[df['days_to_pay'].notna()]
             if not speed.empty:
-                avg_speed = speed.groupby('company')['days_to_pay'].mean().reset_index()
-                st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+                st.dataframe(speed.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
 
         st.write("**Monthly Summary**")
-        pivot_month = df.pivot_table(index='month_sent', values='amount', aggfunc='sum')
-        st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
+        st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.2f}"), use_container_width=True)
 
         st.write("### 📉 Billed vs. Received")
         c_billed = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Value'}); c_billed['Type'] = 'Billed'
         c_paid = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Value'}); c_paid['Type'] = 'Received'
-        st.vega_lite_chart(pd.concat([c_billed, c_paid]), {
+        melted_df = pd.concat([c_billed, c_paid])
+        st.vega_lite_chart(melted_df, {
             'mark': {'type': 'bar', 'width': 20, 'cornerRadiusTopLeft': 3},
             'encoding': {
                 'x': {'field': 'due_date_str', 'type': 'nominal', 'title': 'Due Date'},
@@ -202,12 +200,12 @@ elif page == "Analytics Dashboard":
         }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 פילטרים + צבעים + מערכת בחירה ב"קליק") ---
+# --- PAGE 3: CONTROL (🔍 Multi-Update עם עריכת סכומים) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        st.write("### 🔍 Control Filters")
+        st.write("### 🔍 Filters")
         cf1, cf2, cf3 = st.columns(3)
         c_sel = cf1.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
         c_send = cf2.date_input("Filter Send Date", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
@@ -224,55 +222,62 @@ elif page == "Collections Control 🔍":
             return ''
 
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status', 'notes']
-        st.write("### 📋 Billing Records")
-        edit_mode = st.toggle("✏️ Edit Mode", value=False)
-        with st.expander("View Full Table", expanded=True):
+        edit_mode = st.toggle("✏️ Edit Full Table", value=False)
+        with st.expander("📋 Records View", expanded=True):
             if not edit_mode:
                 st.dataframe(f_df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}", "received_amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
                 edited = st.data_editor(f_df[display_cols], column_config={"id": None, "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]), "amount": st.column_config.NumberColumn("Billed", format="%.2f"), "received_amount": st.column_config.NumberColumn("Received", format="%.2f")}, disabled=['company', 'date', 'due_date'], hide_index=True, use_container_width=True)
-                if st.button("💾 Save All Table Changes"):
+                if st.button("💾 Save Changes"):
                     for i, row in edited.iterrows():
                         supabase.table("billing_history").update({"status": row['status'], "amount": float(row['amount']), "received_amount": float(row['received_amount'])}).eq("id", row['id']).execute()
-                    st.success("Updated!"); st.rerun()
+                    st.success("Saved!"); st.rerun()
 
-        st.divider(); st.write("### 📝 תיעוד גבייה והיסטוריה")
+        st.divider(); st.write("### 📝 Individual Documentation")
         f_df_sorted = f_df.sort_values(by=['due_date_obj', 'company'])
         options = f_df_sorted.apply(lambda r: f"[{r['due_date']}] - {r['company']} (${r['amount']:,.2f})", axis=1).tolist()
         option_to_id = dict(zip(options, f_df_sorted['id'].tolist()))
-        sel_label = st.selectbox("בחר חשבונית לתיעוד:", options)
+        sel_label = st.selectbox("Select to document:", options)
         
         if sel_label:
             sid = option_to_id[sel_label]; row_data = df_raw[df_raw['id'] == sid].iloc[0]
-            st.markdown("**📜 יומן פעולות:**")
+            st.markdown("**📜 Action Log:**")
             if str(row_data['notes']) and str(row_data['notes']) != 'None':
                 for line in str(row_data['notes']).split('\n'):
                     if line.strip(): st.markdown(f"<div class='log-box'>{line}</div>", unsafe_allow_html=True)
-            else: st.caption("אין תיעוד קודם.")
             
-            c_in1, c_in2, c_in3 = st.columns([2, 1, 1])
-            with c_in1: entry = st.text_input("הערה חדשה:")
-            with c_in2: rec_amt = st.number_input("סכום שהתקבל ($):", value=float(row_data['received_amount']))
-            with c_in3: nst = st.selectbox("סטטוס", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key="ind_st")
-            if st.button("שמור תיעוד וסכום"):
+            c_i1, c_i2, c_i3 = st.columns([2, 1, 1])
+            with c_i1: entry = st.text_input("New Note:")
+            with c_i2: rec_amt = st.number_input("Received ($):", value=float(row_data['received_amount']), key="ind_rec")
+            with c_i3: nst = st.selectbox("Status:", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key="ind_st")
+            if st.button("Save Entry"):
                 if entry: add_log_entry(sid, entry)
                 final_st = "Paid" if rec_amt >= row_data['amount'] else nst
-                supabase.table("billing_history").update({"status": final_st, "received_amount": float(rec_amt)}).eq("id", sid).execute()
-                add_log_entry(sid, f"Status Update: {final_st} on {date.today().strftime('%d/%m/%y')} | Received: ${rec_amt:,.2f}")
-                st.success("תועד!"); time.sleep(0.5); st.rerun()
+                supabase.table("billing_history").update({"status": final_status if 'final_status' in locals() else final_st, "received_amount": float(rec_amt)}).eq("id", sid).execute()
+                add_log_entry(sid, f"Update: {final_st} | Received: ${rec_amt:,.2f}")
+                st.success("Updated!"); time.sleep(0.5); st.rerun()
 
-        st.divider(); st.write("### ⚡ Bulk Actions (מערכת בחירה ב'קליק')")
-        # יצירת טבלה לבחירה מהירה
-        bulk_df = f_df_sorted[['id', 'company', 'due_date', 'amount', 'status']].copy()
-        bulk_df['Select'] = False
-        selected_data = st.data_editor(bulk_df, column_config={"id": None, "Select": st.column_config.CheckboxColumn("Select", default=False)}, disabled=['company', 'due_date', 'amount', 'status'], hide_index=True, use_container_width=True)
+        st.divider(); st.write("### ⚡ Bulk Launcher (שיגור גורף עם עריכת סכומים)")
+        # יצירת טבלת מולטי שבה ניתן להזין סכום שהתקבל
+        bulk_prep = f_df_sorted[['id', 'company', 'due_date', 'amount', 'received_amount']].copy()
+        bulk_prep['Select'] = False
+        bulk_prep = bulk_prep[['Select', 'company', 'due_date', 'amount', 'received_amount', 'id']] # סדר עמודות
         
-        if st.button("✅ סגור את כל החשבוניות המסומנות כ'שולם במלואו'"):
-            to_update = selected_data[selected_data['Select'] == True]
-            if not to_update.empty:
-                for i, row in to_update.iterrows():
-                    supabase.table("billing_history").update({"status": "Paid", "received_amount": float(row['amount'])}).eq("id", row['id']).execute()
-                    add_log_entry(row['id'], f"Bulk Update: Fully Paid on {date.today().strftime('%d/%m/%y')}")
-                st.success(f"עודכנו {len(to_update)} חשבוניות בהצלחה!"); time.sleep(1); st.rerun()
-            else: st.warning("לא סומנו חשבוניות.")
+        st.caption("סמן V בשורות שברצונך לעדכן. אם תשאיר סכום Received כ-0, המערכת תשלים אוטומטית לסכום המלא ותהפוך ל-Paid.")
+        selected_bulk = st.data_editor(bulk_prep, column_config={"Select": st.column_config.CheckboxColumn("Select", default=False), "id": None, "amount": st.column_config.NumberColumn("Billed", disabled=True, format="%.2f"), "received_amount": st.column_config.NumberColumn("New Received", format="%.2f")}, disabled=['company', 'due_date', 'amount'], hide_index=True, use_container_width=True)
+        
+        if st.button("🚀 שיגור גורף (Bulk Launch)", use_container_width=True):
+            to_launch = selected_bulk[selected_bulk['Select'] == True]
+            if not to_launch.empty:
+                for i, row in to_launch.iterrows():
+                    orig_amt = float(row['amount'])
+                    new_rec = float(row['received_amount'])
+                    # לוגיקה: אם סומן וי והסכום נשאר 0 -> שולם הכל. אחרת -> מה שהוזן.
+                    final_rec = orig_amt if new_rec == 0 else new_rec
+                    final_status = "Paid" if final_rec >= orig_amt else "Sent"
+                    
+                    supabase.table("billing_history").update({"status": final_status, "received_amount": final_rec}).eq("id", row['id']).execute()
+                    add_log_entry(row['id'], f"Bulk Launch: Status to {final_status} | Received: ${final_rec:,.2f}")
+                st.success(f"שוגרו {len(to_launch)} עדכונים בהצלחה!"); time.sleep(1); st.rerun()
+            else: st.warning("לא נבחרו שורות לשיגור.")
     else: st.info("No records.")
