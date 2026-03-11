@@ -34,6 +34,7 @@ st.markdown("""<style>
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; text-align: center; }
     .big-detective { font-size: 350px; text-align: center; margin: 20px 0; display: block; }
     .tuesday-header { font-size: 28px; font-weight: 900; color: #003366; margin-bottom: 10px; padding-left: 5px; }
+    .app-pass-info { font-size: 12px; color: #4a5568; background: #edf2f7; padding: 10px; border-radius: 5px; margin-bottom: 15px; line-height: 1.4; }
 </style>""", unsafe_allow_html=True)
 
 # --- 3. Helper Functions ---
@@ -98,7 +99,14 @@ page = st.sidebar.radio("Navigation", ["Email Sender 📧", "Analytics Dashboard
 if page == "Email Sender 📧":
     st.title("Invoicing Center")
     col_up, col_due = st.columns([2, 1])
-    with col_up: up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
+    with col_up: 
+        up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
+        if up_ex and "emails" not in up_ex.name.lower():
+            st.error("🚨 Wrong File! Please upload the 'Emails' file.")
+            allow_send = False
+        else:
+            allow_send = True
+
     with col_due:
         st.markdown('<p style="font-weight:700; color:#4a5568;">SET DUE DATE</p>', unsafe_allow_html=True)
         mc, yc = st.columns(2)
@@ -107,8 +115,8 @@ if page == "Email Sender 📧":
         sel_y = yc.selectbox("Year", ["2025", "2026", "2027"], index=1)
     
     uploaded_files = st.file_uploader("Drop Company Invoices Here", accept_multiple_files=True)
-    allow_send = True
-    if up_ex and uploaded_files:
+    
+    if up_ex and "emails" in up_ex.name.lower() and uploaded_files:
         try:
             df_ex = pd.read_excel(up_ex)
             excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
@@ -119,12 +127,22 @@ if page == "Email Sender 📧":
                 if not allow_send:
                     st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
                     st.warning(f"Waiting for files: {', '.join(missing)}")
+            else:
+                allow_send = True
         except: pass
 
     st.write("---")
+    st.markdown("""<div class="app-pass-info">
+        <b>💡 How to get App Password:</b><br>
+        1. Go to Google Account > Security.<br>
+        2. Enable 2-Step Verification.<br>
+        3. Search for 'App Passwords' at the top search bar.<br>
+        4. Create 'Other' and name it 'Tuesday'. Copy the 16-character code here.
+    </div>""", unsafe_allow_html=True)
+    
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Account"); user_pass = sc2.text_input("App Password", type="password")
 
-    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not allow_send):
+    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_ex and uploaded_files and allow_send)):
         try:
             df_master = pd.read_excel(up_ex).dropna(how='all')
             server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
@@ -146,7 +164,7 @@ if page == "Email Sender 📧":
                 server.quit(); placeholder.empty(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); st.audio("https://www.myinstants.com/media/sounds/victory-sound-effect.mp3", autoplay=True); time.sleep(3); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 סעיף 5 בחוזה) ---
+# --- PAGE 2: ANALYTICS ---
 elif page == "Analytics Dashboard 📊":
     st.title("Financial Overview")
     df_raw = get_cloud_history()
@@ -186,7 +204,7 @@ elif page == "Analytics Dashboard 📊":
         st.vega_lite_chart(pd.concat([c_billed, c_paid]), {'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 3}, 'encoding': {'x': {'field': 'due_date_str', 'type': 'nominal'}, 'y': {'field': 'Val', 'type': 'quantitative'}, 'xOffset': {'field': 'Type'}, 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}}}, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 סעיפים 6, 7, 8 בחוזה) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("Operations Control")
     df_raw = get_cloud_history()
@@ -241,10 +259,15 @@ elif page == "Collections Control 🔍":
                     add_log_entry(row['id'], f"Batch Update: {f_st} | ${f_rec:,.2f}")
                 st.success("Bulk update successful."); time.sleep(1); st.rerun()
 
-# --- PAGE 4: REMINDERS MANAGER (🚨 סעיף 7 בחוזה) ---
+# --- PAGE 4: REMINDERS MANAGER ---
 elif page == "Reminders Manager 🚨":
     st.title("Reminders Manager")
     mail_file = st.file_uploader("Upload Company Email List (Excel)", type=['xlsx'])
+    
+    if mail_file and "emails" not in mail_file.name.lower():
+        st.error("🚨 Wrong File! Please upload the 'Emails' file.")
+        mail_file = None
+
     df_raw = get_cloud_history()
     if not df_raw.empty:
         df_raw['balance'] = df_raw['amount'] - df_raw['received_amount']
@@ -254,7 +277,7 @@ elif page == "Reminders Manager 🚨":
             unpaid_df['Select'] = False
             sel_disp = st.data_editor(unpaid_df[['Select', 'company', 'due_date', 'amount', 'received_amount', 'balance', 'id']], column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None, "amount": st.column_config.NumberColumn("Bill", format="%.2f"), "balance": st.column_config.NumberColumn("Outstanding", format="%.2f")}, disabled=['company', 'due_date', 'amount', 'received_amount', 'balance'], hide_index=True, use_container_width=True)
             d_sc1, d_sc2 = st.columns(2); d_mail = d_sc1.text_input("Sender Gmail"); d_pass = d_sc2.text_input("App Password", type="password")
-            if st.button("🚀 Send Reminders", use_container_width=True):
+            if st.button("🚀 Send Reminders", use_container_width=True, disabled=not mail_file):
                 to_send = sel_disp[sel_disp['Select'] == True]
                 if not to_send.empty and mail_file:
                     try:
