@@ -7,7 +7,7 @@ from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta, date
 from supabase import create_client, Client
 
-# --- 1. Supabase Connection (🛡️ סעיף 1) ---
+# --- 1. Supabase Connection (🛡️ סעיף 1 בחוזה) ---
 supabase = None
 try:
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
@@ -90,7 +90,7 @@ def add_log_entry(item_id, entry_text):
     updated = f"{old_notes}\n{new_entry}".strip() if old_notes else new_entry
     supabase.table("billing_history").update({"notes": updated}).eq("id", item_id).execute()
 
-# --- 4. Sidebar & Navigation ---
+# --- 4. Sidebar & Navigation (Tuesday Header) ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 page = st.sidebar.radio("Navigation", ["Email Sender 📧", "Analytics Dashboard 📊", "Collections Control 🔍", "Reminders Manager 🚨"])
 
@@ -98,13 +98,9 @@ page = st.sidebar.radio("Navigation", ["Email Sender 📧", "Analytics Dashboard
 if page == "Email Sender 📧":
     st.title("Invoicing Center")
     col_up, col_due = st.columns([2, 1])
+    
     with col_up: 
         up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
-        file_name_ok = True
-        if up_ex and "emails" not in up_ex.name.lower():
-            st.error("🕵️‍♂️ הבלש מזהה: שם הקובץ אינו מכיל 'Emails'.")
-            file_name_ok = st.checkbox("אני מאשר שזה קובץ המיילים הנכון", value=False)
-
     with col_due:
         st.markdown('<p style="font-weight:700; color:#4a5568;">SET DUE DATE</p>', unsafe_allow_html=True)
         mc, yc = st.columns(2)
@@ -115,32 +111,38 @@ if page == "Email Sender 📧":
     uploaded_files = st.file_uploader("Drop Company Invoices Here", accept_multiple_files=True)
     
     confirm_dispatch = False
-    if up_ex and uploaded_files:
-        try:
-            df_ex = pd.read_excel(up_ex)
-            excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
-            file_names = [f.name for f in uploaded_files]
-            missing = [c for c in excel_comps if not any(c.lower() in fn.lower() for fn in file_names)]
-            
-            if missing:
+    if up_ex:
+        missing = []
+        name_issue = "emails" not in up_ex.name.lower()
+        
+        if uploaded_files:
+            try:
+                df_ex = pd.read_excel(up_ex)
+                excel_comps = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
+                file_names = [f.name for f in uploaded_files]
+                missing = [c for c in excel_comps if not any(c.lower() in fn.lower() for fn in file_names)]
+            except: pass
+
+        if missing or name_issue:
+            confirm_dispatch = st.checkbox("🚨 אני מאשר שהנתונים תקינים לשליחה (הסתר אזהרות)", value=False)
+            if not confirm_dispatch:
                 st.markdown('<p class="big-detective">🕵️‍♂️</p>', unsafe_allow_html=True)
-                st.warning(f"הבלש מזהה חוסרים: {', '.join(missing)}")
-                confirm_dispatch = st.checkbox("🚨 אני מאשר שהנתונים תקינים למרות החוסרים", value=False)
-            else:
-                confirm_dispatch = file_name_ok
-        except: confirm_dispatch = True
+                if name_issue: st.error("הבלש מזהה: שם הקובץ אינו מכיל 'Emails'.")
+                if missing: st.warning(f"הבלש מזהה חוסרים עבור: {', '.join(missing)}")
+        else:
+            confirm_dispatch = True
 
     st.write("---")
     with st.expander("💡 How to get App Password"):
         st.markdown("""
         1. לחץ כאן למעבר להגדרות: [Google App Passwords](https://myaccount.google.com/apppasswords)
-        2. וודא ש-2-Step Verification מופעל בחשבון הגוגל שלך.
+        2. וודא ש-2-Step Verification מופעל.
         3. צור סיסמה חדשה תחת השם 'Tuesday'. העתק את הקוד בן 16 התווים לכאן.
         """)
     
     sc1, sc2 = st.columns(2); user_mail = sc1.text_input("Gmail Account"); user_pass = sc2.text_input("App Password", type="password")
 
-    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (confirm_dispatch and up_ex)):
+    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (confirm_dispatch and up_ex and uploaded_files)):
         try:
             df_master = pd.read_excel(up_ex).dropna(how='all')
             server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
@@ -252,16 +254,18 @@ elif page == "Collections Control 🔍":
                     add_log_entry(row['id'], f"Batch Update: {f_st} | ${f_rec:,.2f}")
                 st.success("Bulk update successful."); time.sleep(1); st.rerun()
 
-# --- PAGE 4: REMINDERS MANAGER (🔥 FIXED SEND LOGIC) ---
+# --- PAGE 4: REMINDERS MANAGER ---
 elif page == "Reminders Manager 🚨":
     st.title("Reminders Manager")
     mail_file = st.file_uploader("Upload Emails File", type=['xlsx'])
     
     confirm_reminders = False
     if mail_file:
-        if "emails" not in mail_file.name.lower():
-            st.error("🕵️‍♂️ הבלש מזהה: הקובץ שהועלה אינו מכיל 'Emails' בשמו.")
-            confirm_reminders = st.checkbox("אני מאשר שזה קובץ המיילים הנכון", value=False)
+        name_issue = "emails" not in mail_file.name.lower()
+        if name_issue:
+            confirm_reminders = st.checkbox("אני מאשר שזה קובץ המיילים הנכון (הסתר אזהרה)", value=False)
+            if not confirm_reminders:
+                st.error("🕵️‍♂️ הבלש מזהה: שם הקובץ אינו מכיל 'Emails'.")
         else:
             confirm_reminders = True
 
@@ -273,7 +277,6 @@ elif page == "Reminders Manager 🚨":
         else:
             unpaid_df['Select'] = False
             sel_disp = st.data_editor(unpaid_df[['Select', 'company', 'due_date', 'amount', 'received_amount', 'balance', 'id']], column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None, "amount": st.column_config.NumberColumn("Bill", format="%.2f"), "balance": st.column_config.NumberColumn("Outstanding", format="%.2f")}, disabled=['company', 'due_date', 'amount', 'received_amount', 'balance'], hide_index=True, use_container_width=True)
-            
             d_sc1, d_sc2 = st.columns(2); d_mail = d_sc1.text_input("Sender Gmail Account"); d_pass = d_sc2.text_input("Sender App Password", type="password")
             
             if st.button("🚀 Send Reminders", use_container_width=True, disabled=not (confirm_reminders and mail_file)):
@@ -281,33 +284,21 @@ elif page == "Reminders Manager 🚨":
                 if not to_send.empty and d_mail and d_pass:
                     try:
                         email_map = pd.read_excel(mail_file)
-                        # Vlookup logic
                         email_dict = dict(zip(email_map.iloc[:, 0].str.strip().str.lower(), email_map.iloc[:, 1].str.strip()))
-                        
                         server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                         server.login(d_mail.strip(), d_pass.strip().replace(" ", ""))
-                        
                         with st.spinner("Sending reminders..."):
                             placeholder = st.empty()
                             placeholder.markdown("""<div class="suitcase-container"><svg width="100" height="100" viewBox="0 0 24 24" fill="#d32f2f"><path d="M12,2L1,21h22L12,2z M12,6l7.5,13h-15L12,6z M11,10v4h2v-4H11z M11,16v2h2v-2H11z"/></svg><p style='color:#d32f2f;font-weight:700;'>Alerting...</p></div>""", unsafe_allow_html=True)
-                            
                             for i, row in to_send.iterrows():
                                 comp_key = str(row['company']).strip().lower()
                                 target = email_dict.get(comp_key)
                                 if target:
-                                    # Template
                                     body = f"תביאו את הכסף מחכים.\n\nחברה: {row['company']}\nיתרה לתשלום: ${row['balance']:,.2f}"
                                     msg = MIMEMultipart(); msg['Subject'] = f"דרישת תשלום דחופה - {row['company']}"; msg['To'] = target
                                     msg.attach(MIMEText(body, 'plain'))
-                                    
-                                    # --- המעשה בשטח: שליחת המייל ---
                                     server.send_message(msg)
-                                    
-                                    # --- עדכון בסיס נתונים ---
                                     add_log_entry(row['id'], f"🚨 Reminder sent to {target} | Balance: ${row['balance']:,.2f}")
                                     supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
-                        
                         server.quit(); placeholder.empty(); st.balloons(); st.success("Reminders sent successfully!"); time.sleep(2); st.rerun()
                     except Exception as e: st.error(f"Execution Error: {e}")
-                else:
-                    st.warning("בחר לפחות שורה אחת וודא שפרטי המייל הוזנו.")
