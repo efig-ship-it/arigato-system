@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 - חזרה ל-Centered) ---
+# --- 2. CSS & Design (🎨 סעיף 7 - הכל כולל הגדלת תיבות התראה) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { padding-top: 0rem; }
@@ -26,8 +26,10 @@ st.markdown("""<style>
     .big-detective { font-size: 400px; text-align: center; margin: 10px 0; display: block; } 
     .success-msg { font-size: 100px; font-weight: 900; color: #28a745; text-align: center; margin-top: 20px; }
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; }
-    div[data-testid="metric-container"] { padding: 5px 10px; border: 1px solid #f0f2f6; border-radius: 10px; }
-    .alert-box { padding: 15px; border-radius: 10px; margin-bottom: 10px; }
+    div[data-testid="metric-container"] { padding: 15px; border: 1px solid #f0f2f6; border-radius: 10px; background-color: #ffffff; }
+    .alert-box { padding: 25px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .alert-box h2 { font-size: 36px; margin: 0; }
+    .alert-box p { font-size: 16px; margin: 0; font-weight: bold; }
     .log-box { background-color: #f9f9f9; padding: 10px; border-radius: 5px; border-right: 3px solid #003366; margin-top: 5px; font-size: 12px; direction: rtl; }
 </style>""", unsafe_allow_html=True)
 
@@ -45,6 +47,17 @@ def get_cloud_history():
             df['received_amount'] = pd.to_numeric(df.get('received_amount', 0), errors='coerce').fillna(0.0)
             df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
             df['due_date_obj'] = df['due_date_dt'].dt.date
+            df['month_sent'] = df['date_sent_dt'].dt.strftime('%b %Y')
+            
+            def extract_days(note, sent_date):
+                match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
+                if match and not pd.isna(sent_date):
+                    try:
+                        paid_dt = pd.to_datetime(match.group(1), format='%d/%m/%y')
+                        return (paid_dt - sent_date).days
+                    except: return None
+                return None
+            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent_dt']), axis=1)
         return df
     except: return pd.DataFrame()
 
@@ -129,7 +142,7 @@ if page == "Email Sender":
             server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); time.sleep(2); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 פריסה לאורך) ---
+# --- PAGE 2: ANALYTICS (📊 פיבוטים מלאים + פילטרים + תיבות גדולות) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
@@ -138,22 +151,49 @@ elif page == "Analytics Dashboard":
         risk = df[(df['status'] != 'Paid') & (df['due_date_obj'] < today - timedelta(days=7))]['amount'].sum()
         forecast = df[(df['status'] != 'Paid') & (df['due_date_obj'] >= today) & (df['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
         
-        st.markdown(f'<div class="alert-box" style="background-color: #ffebee; border-right: 5px solid #d32f2f;">🚩 High Risk: ${risk:,.2f}</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="alert-box" style="background-color: #e8f5e9; border-right: 5px solid #2e7d32;">💰 Forecast: ${forecast:,.2f}</div>', unsafe_allow_html=True)
+        st.write("### 🚨 התראות מנהל")
+        c1, c2 = st.columns(2)
+        c1.markdown(f'<div class="alert-box" style="background-color: #ffebee; border-right: 8px solid #d32f2f;"><p style="color: #d32f2f;">🚩 HIGH RISK (OVERDUE > 7D)</p><h2>${risk:,.2f}</h2></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="alert-box" style="background-color: #e8f5e9; border-right: 8px solid #2e7d32;"><p style="color: #2e7d32;">💰 FORECAST (NEXT 7D)</p><h2>${forecast:,.2f}</h2></div>', unsafe_allow_html=True)
+
+        st.divider()
+        f1, f2, f3 = st.columns(3)
+        sel_comps = f1.multiselect("Companies", sorted(df['company'].unique()))
+        send_range = f2.date_input("Send Range", value=(df['date_sent_obj'].min(), df['date_sent_obj'].max()))
+        due_range = f3.date_input("Due Range", value=(df['due_date_obj'].min(), df['due_date_obj'].max()))
+        
+        df_filt = df.copy()
+        if sel_comps: df_filt = df_filt[df_filt['company'].isin(sel_comps)]
+        if isinstance(send_range, tuple) and len(send_range) == 2: df_filt = df_filt[(df_filt['date_sent_obj'] >= send_range[0]) & (df_filt['date_sent_obj'] <= send_range[1])]
+        if isinstance(due_range, tuple) and len(due_range) == 2: df_filt = df_filt[(df_filt['due_date_obj'] >= due_range[0]) & (df_filt['due_date_obj'] <= due_range[1])]
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Billed", f"${df['amount'].sum():,.2f}")
-        m2.metric("Received", f"${df['received_amount'].sum():,.2f}")
-        m3.metric("Balance", f"${df['amount'].sum() - df['received_amount'].sum():,.2f}")
+        tb, tr = df_filt['amount'].sum(), df_filt['received_amount'].sum()
+        m1.metric("Total Billed", f"${tb:,.2f}")
+        m2.metric("Received", f"${tr:,.2f}")
+        m3.metric("Outstanding", f"${tb-tr:,.2f}")
         
         st.divider()
         st.write("### 🧮 Data Pivots")
-        pivot_comp = df.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
-        st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
-        
-        st.write("### 📉 Comparison")
-        chart_billed = df.groupby('due_date_obj')['amount'].sum().reset_index(); chart_billed['Type'] = 'Billed'
-        chart_paid = df.groupby('due_date_obj')['received_amount'].sum().reset_index(); chart_paid['Type'] = 'Received'
+        p1, p2 = st.columns(2)
+        with p1:
+            st.write("**Sent vs. Paid (by Company)**")
+            pivot_comp = df_filt.pivot_table(index=['company'], columns='status', values='amount', aggfunc='sum', fill_value=0)
+            st.dataframe(pivot_comp.style.format("${:,.2f}"), use_container_width=True)
+        with p2:
+            st.write("**Payment Performance (Avg. Days)**")
+            speed_df = df_filt[df_filt['days_to_pay'].notna()]
+            if not speed_df.empty:
+                avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
+                st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
+
+        st.write("### 📅 Monthly Summary")
+        pivot_month = df_filt.pivot_table(index='month_sent', values='amount', aggfunc='sum')
+        st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
+
+        st.write("### 📉 Billed vs. Received")
+        chart_billed = df_filt.groupby('due_date_obj')['amount'].sum().reset_index(); chart_billed['Type'] = 'Billed'
+        chart_paid = df_filt.groupby('due_date_obj')['received_amount'].sum().reset_index(); chart_paid['Type'] = 'Received'
         st.vega_lite_chart(pd.concat([chart_billed, chart_paid]), {
             'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 2, 'cornerRadiusTopRight': 2},
             'encoding': {
@@ -165,28 +205,32 @@ elif page == "Analytics Dashboard":
         }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 Multi הועבר למטה) ---
+# --- PAGE 3: CONTROL (🔍 צבעים בטבלה חזרו + פילטרים + מולטי) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
     if not df_raw.empty:
-        # 1. פילטרים
-        cf1, cf2 = st.columns(2)
+        cf1, cf2, cf3 = st.columns(3)
         c_sel = cf1.multiselect("Filter Companies", sorted(df_raw['company'].unique()))
-        c_range = cf2.date_input("Filter Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        c_send = cf2.date_input("Filter Send Date", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        c_due = cf3.date_input("Filter Due Date", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
         
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
-        if isinstance(c_range, tuple) and len(c_range) == 2:
-            f_df = f_df[(f_df['due_date_obj'] >= c_range[0]) & (f_df['due_date_obj'] <= c_range[1])]
+        if isinstance(c_send, tuple) and len(c_send) == 2: f_df = f_df[(f_df['date_sent_obj'] >= c_send[0]) & (f_df['date_sent_obj'] <= c_send[1])]
+        if isinstance(c_due, tuple) and len(c_due, tuple) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
 
-        # 2. הטבלה המרכזית
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
-        display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status']
+        display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status', 'notes']
         
+        def highlight_status(val):
+            if val == 'Paid': return 'background-color: #28a745; color: white;'
+            if val == 'Overdue': return 'background-color: #d32f2f; color: white;'
+            return ''
+
         with st.expander("📋 Billing Records", expanded=True):
             if not edit_mode:
-                st.dataframe(f_df[display_cols].style.format({"amount": "{:,.2f}", "received_amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
+                st.dataframe(f_df[display_cols].style.map(highlight_status, subset=['status']).format({"amount": "{:,.2f}", "received_amount": "{:,.2f}"}), use_container_width=True, hide_index=True)
             else:
                 edited = st.data_editor(f_df[display_cols], column_config={
                     "status": st.column_config.SelectboxColumn("Status", options=["Sent", "Paid", "In Dispute", "Overdue"]),
@@ -198,7 +242,6 @@ elif page == "Collections Control 🔍":
                     st.success("Updated!"); st.rerun()
 
         st.divider()
-        # 3. תיעוד פרטני (היסטוריה + תשלום חלקי)
         st.subheader("📝 Individual Documentation")
         f_df_sorted = f_df.sort_values(by=['due_date_obj', 'company'])
         options = f_df_sorted.apply(lambda r: f"[{r['due_date']}] - {r['company']} (${r['amount']:,.2f})", axis=1).tolist()
@@ -212,8 +255,8 @@ elif page == "Collections Control 🔍":
             
             c_in1, c_in2, c_in3 = st.columns([2, 1, 1])
             with c_in1: entry = st.text_input("New Note:")
-            with c_in2: rec_amt = st.number_input("Received ($):", value=float(row_data['received_amount']), key=f"amt_{sid}")
-            with c_in3: nst = st.selectbox("New Status:", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']), key=f"st_{sid}")
+            with c_in2: rec_amt = st.number_input("Received ($):", value=float(row_data['received_amount']))
+            with c_in3: nst = st.selectbox("New Status:", ["Sent", "Paid", "Overdue", "In Dispute"], index=["Sent", "Paid", "Overdue", "In Dispute"].index(row_data['status']))
             
             if st.button("Save Documentation"):
                 if entry: add_log_entry(sid, entry)
@@ -223,13 +266,11 @@ elif page == "Collections Control 🔍":
                 st.success("Documented!"); st.rerun()
 
         st.divider()
-        # 4. מנגנון Multi (עבר לתחתית הדף)
         st.subheader("⚡ Bulk Actions (Multi-Select)")
         bulk_list = st.multiselect("Select invoices for Bulk Full Payment:", options)
         if st.button("✅ Mark All Selected as Fully Paid", use_container_width=True):
             for item in bulk_list:
-                bid = option_to_id[item]
-                b_amt = df_raw[df_raw['id'] == bid]['amount'].values[0]
+                bid = option_to_id[item]; b_amt = df_raw[df_raw['id'] == bid]['amount'].values[0]
                 supabase.table("billing_history").update({"status": "Paid", "received_amount": float(b_amt)}).eq("id", bid).execute()
                 add_log_entry(bid, "Bulk update: Fully Paid")
             st.success("Bulk update complete!"); st.rerun()
