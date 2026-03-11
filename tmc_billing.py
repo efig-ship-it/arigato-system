@@ -47,6 +47,7 @@ def get_cloud_history():
             df['received_amount'] = pd.to_numeric(df.get('received_amount', 0), errors='coerce').fillna(0.0)
             df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
             df['due_date_obj'] = df['due_date_dt'].dt.date
+            df['due_date_str'] = df['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else "")
             df['month_sent'] = df['date_sent_dt'].dt.strftime('%b %Y')
             
             def extract_days(note, sent_date):
@@ -142,7 +143,7 @@ if page == "Email Sender":
             server.quit(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); time.sleep(2); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 פיבוטים מלאים + פילטרים + תיבות גדולות) ---
+# --- PAGE 2: ANALYTICS (📊 גרף מתוקן ומוצמד) ---
 elif page == "Analytics Dashboard":
     st.title("📊 Analytics Dashboard")
     df = get_cloud_history()
@@ -187,25 +188,24 @@ elif page == "Analytics Dashboard":
                 avg_speed = speed_df.groupby('company')['days_to_pay'].mean().reset_index()
                 st.dataframe(avg_speed.style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
 
-        st.write("### 📅 Monthly Summary")
-        pivot_month = df_filt.pivot_table(index='month_sent', values='amount', aggfunc='sum')
-        st.dataframe(pivot_month.style.format("${:,.2f}"), use_container_width=True)
-
         st.write("### 📉 Billed vs. Received")
-        chart_billed = df_filt.groupby('due_date_obj')['amount'].sum().reset_index(); chart_billed['Type'] = 'Billed'
-        chart_paid = df_filt.groupby('due_date_obj')['received_amount'].sum().reset_index(); chart_paid['Type'] = 'Received'
-        st.vega_lite_chart(pd.concat([chart_billed, chart_paid]), {
-            'mark': {'type': 'bar', 'width': 18, 'cornerRadiusTopLeft': 2, 'cornerRadiusTopRight': 2},
+        # הכנת נתונים לגרף: סכימה לפי תאריך (בפורמט טקסט) וסוג
+        chart_billed = df_filt.groupby('due_date_str')['amount'].sum().reset_index(); chart_billed['Type'] = 'Billed'
+        chart_paid = df_filt.groupby('due_date_str')['received_amount'].sum().reset_index(); chart_paid['Type'] = 'Received'
+        plot_df = pd.concat([chart_billed, chart_paid])
+
+        st.vega_lite_chart(plot_df, {
+            'mark': {'type': 'bar', 'width': 22, 'cornerRadiusTopLeft': 3, 'cornerRadiusTopRight': 3},
             'encoding': {
-                'x': {'field': 'due_date_obj', 'type': 'nominal', 'title': 'Due Date'},
-                'y': {'field': 'amount', 'type': 'quantitative'},
+                'x': {'field': 'due_date_str', 'type': 'nominal', 'title': 'Due Date (YYYY-MM-DD)'},
+                'y': {'field': 'amount', 'type': 'quantitative', 'title': 'Amount ($)'},
                 'xOffset': {'field': 'Type'},
                 'color': {'field': 'Type', 'type': 'nominal', 'scale': {'range': ['#003366', '#87CEEB']}}
             }
         }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 בקרה עם צבעים, פילטרים ומולטי) ---
+# --- PAGE 3: CONTROL ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
