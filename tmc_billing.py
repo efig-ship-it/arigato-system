@@ -18,7 +18,7 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. CSS & Design (🎨 סעיף 7 - הכל כולל הגדלת תיבות התראה) ---
+# --- 2. CSS & Design (🎨 סעיף 7) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { padding-top: 0rem; }
@@ -205,7 +205,7 @@ elif page == "Analytics Dashboard":
         }, use_container_width=True)
     else: st.info("No data.")
 
-# --- PAGE 3: CONTROL (🔍 צבעים בטבלה חזרו + פילטרים + מולטי) ---
+# --- PAGE 3: CONTROL (🔍 בקרה עם צבעים, פילטרים ומולטי) ---
 elif page == "Collections Control 🔍":
     st.title("🔍 Collections Control")
     df_raw = get_cloud_history()
@@ -218,7 +218,7 @@ elif page == "Collections Control 🔍":
         f_df = df_raw.copy()
         if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
         if isinstance(c_send, tuple) and len(c_send) == 2: f_df = f_df[(f_df['date_sent_obj'] >= c_send[0]) & (f_df['date_sent_obj'] <= c_send[1])]
-        if isinstance(c_due, tuple) and len(c_due, tuple) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
+        if isinstance(c_due, tuple) and len(c_due) == 2: f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
 
         edit_mode = st.toggle("✏️ Edit Mode", value=False)
         display_cols = ['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status', 'notes']
