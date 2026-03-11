@@ -18,32 +18,17 @@ try:
 except:
     st.sidebar.error("🚨 Cloud Connection Failed")
 
-# --- 2. UI CSS (תיקון גודל מדדים) ---
+# --- 2. UI CSS (נאמן לחוזה + תיקון גדלים) ---
 st.set_page_config(page_title="TMC Billing PRO", layout="centered")
 st.markdown("""<style>
     .main { background-color: #f4f7f9; }
-    
-    /* עיצוב המדדים - הקטנה משמעותית כדי למנוע חיתוך */
-    div[data-testid="stMetricValue"] {
-        font-size: 20px !important;
-        font-weight: 700 !important;
-    }
-    div[data-testid="stMetricLabel"] {
-        font-size: 12px !important;
-    }
-    div[data-testid="stMetric"] {
-        background-color: #ffffff; 
-        border-radius: 10px; 
-        border: 1px solid #e1e8ed;
-        padding: 10px !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    }
-
+    div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: 700 !important; }
+    div[data-testid="stMetricLabel"] { font-size: 12px !important; }
+    div[data-testid="stMetric"] { background-color: #ffffff; border-radius: 10px; border: 1px solid #e1e8ed; padding: 10px !important; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     h1 { color: #1a202c; font-weight: 800; margin-bottom: 20px; }
-    .alert-box { border-right: 6px solid #003366; margin-bottom: 25px; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e1e8ed; border-right: 6px solid #003366;}
+    .alert-box { border-right: 6px solid #003366; margin-bottom: 25px; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e1e8ed; }
     .alert-box h2 { font-size: 24px; margin: 0; color: #1a202c; }
     .alert-box p { font-size: 11px; color: #718096; text-transform: uppercase; font-weight: 600; margin-bottom: 2px; }
-    
     .log-box { background-color: #ffffff; padding: 12px; border-radius: 6px; border: 1px solid #e0e4e8; border-right: 4px solid #003366; margin-bottom: 8px; font-size: 13px; direction: rtl; }
     .success-msg { font-size: 60px; font-weight: 900; color: #28a745; text-align: center; margin-top: 10px; display: block; }
     .suitcase-container { display: flex; flex-direction: column; align-items: center; justify-content: center; margin: 20px 0; text-align: center; }
@@ -66,7 +51,6 @@ def get_cloud_history():
             df['due_date_str'] = df['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else "")
             df['month_sent'] = df['date_sent_dt'].dt.strftime('%b %Y')
             df['balance'] = df['amount'] - df['received_amount']
-            
             def extract_days(note, sent_date):
                 match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
                 if match and not pd.isna(sent_date):
@@ -129,8 +113,7 @@ if page == "Email Sender 📧":
             missing = [c for c in excel_comps if not any(c.lower() in fn.lower() for fn in file_names)]
             if missing:
                 allow_send = st.toggle("Manual Override: Files Verified", value=False)
-                if not allow_send:
-                    st.warning(f"Waiting for files: {', '.join(missing)}")
+                if not allow_send: st.warning(f"Waiting for files: {', '.join(missing)}")
         except: pass
 
     st.write("---")
@@ -158,24 +141,31 @@ if page == "Email Sender 📧":
                 server.quit(); placeholder.empty(); st.balloons(); st.markdown('<p class="success-msg">SUCCESS</p>', unsafe_allow_html=True); time.sleep(3); st.rerun()
         except Exception as e: st.error(f"Error: {e}")
 
-# --- PAGE 2: ANALYTICS (📊 תיקון התצוגה של המדדים) ---
+# --- PAGE 2: ANALYTICS (📊 פילטרים + מדדים + פיבוטים) ---
 elif page == "Analytics Dashboard 📊":
     st.title("Financial Overview")
     df_raw = get_cloud_history()
     if not df_raw.empty:
         today = date.today()
-        risk = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < today - timedelta(days=7))]['amount'].sum()
-        forecast = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
+        risk_val = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] < today - timedelta(days=7))]['amount'].sum()
+        forecast_val = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
         
         c1, c2 = st.columns(2)
-        c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e;"><p>Critical Overdue</p><h2>${risk:,.0f}</h2></div>', unsafe_allow_html=True)
-        c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169;"><p>Expected (Next 7d)</p><h2>${forecast:,.0f}</h2></div>', unsafe_allow_html=True)
+        c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e;"><p>Critical Overdue</p><h2>${risk_val:,.0f}</h2></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169;"><p>Expected (Next 7d)</p><h2>${forecast_val:,.0f}</h2></div>', unsafe_allow_html=True)
 
-        st.divider(); f1, f2, f3 = st.columns(3)
+        st.divider()
+        st.subheader("Global Filters")
+        f1, f2, f3 = st.columns(3)
         sel_comps = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
+        send_range = f2.date_input("Send Range", value=(df_raw['date_sent_obj'].min(), df_raw['date_sent_obj'].max()))
+        due_range = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
+        
         df = df_raw.copy()
         if sel_comps: df = df[df['company'].isin(sel_comps)]
-        
+        if isinstance(send_range, tuple) and len(send_range) == 2: df = df[(df['date_sent_obj'] >= send_range[0]) & (df['date_sent_obj'] <= send_range[1])]
+        if isinstance(due_range, tuple) and len(due_range) == 2: df = df[(df['due_date_obj'] >= due_range[0]) & (df['due_date_obj'] <= due_range[1])]
+
         st.write("### Key Metrics")
         m1, m2, m3, m4 = st.columns(4)
         tb, tr = df['amount'].sum(), df['received_amount'].sum()
@@ -195,6 +185,9 @@ elif page == "Analytics Dashboard 📊":
             speed = df[df['days_to_pay'].notna()]
             if not speed.empty: st.dataframe(speed.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True, hide_index=True)
         
+        st.write("**Monthly Summary**")
+        st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.0f}"), use_container_width=True)
+
         st.write("### 📉 Efficiency Chart")
         c_billed = df.groupby('due_date_str')['amount'].sum().reset_index().rename(columns={'amount': 'Val'}); c_billed['Type'] = 'Billed'
         c_paid = df.groupby('due_date_str')['received_amount'].sum().reset_index().rename(columns={'received_amount': 'Val'}); c_paid['Type'] = 'Received'
