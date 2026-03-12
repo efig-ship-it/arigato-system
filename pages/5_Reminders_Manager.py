@@ -9,7 +9,7 @@ from app import get_cloud_history, supabase
 # --- SIDEBAR BRANDING ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
-# --- CSS & ANIMATIONS & AUDIO SCRIPT ---
+# --- CSS & ANIMATIONS & ROBUST AUDIO ---
 st.markdown("""
     <style>
     .tuesday-header {
@@ -26,8 +26,8 @@ st.markdown("""
         background: linear-gradient(90deg, #ff0000, #0000ff, #ff0000, #0000ff);
         background-size: 300% 300%;
         border-radius: 30px;
-        box-shadow: 0 0 30px rgba(255, 0, 0, 0.8);
-        animation: police-flash 0.3s linear infinite, suitcase-move 1.5s infinite ease-in-out;
+        box-shadow: 0 0 35px rgba(255, 0, 0, 0.9);
+        animation: police-flash 0.2s linear infinite, suitcase-move 1.5s infinite ease-in-out;
     }
     @keyframes police-flash { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
     @keyframes suitcase-move {
@@ -37,10 +37,17 @@ st.markdown("""
     }
     </style>
     
+    <audio id="siren-audio" preload="auto">
+        <source src="https://www.soundjay.com/misc/sounds/siren-1.mp3" type="audio/mpeg">
+    </audio>
+
     <script>
     function playSiren() {
-        var audio = new Audio('https://www.soundjay.com/buttons/beep-01a.mp3'); // צליל ביפ/סירנה
-        audio.play();
+        var audio = window.parent.document.getElementById('siren-audio');
+        if (audio) {
+            audio.currentTime = 0;
+            audio.play();
+        }
     }
     </script>
 """, unsafe_allow_html=True)
@@ -93,10 +100,10 @@ with center_col:
                 selected = edited_df[edited_df['Select'] == True]
                 
                 if selected.empty or not u_m or not u_p or not up_ex:
-                    st.error("Please fill all details.")
+                    st.error("Please fill all details and upload the Excel list.")
                 else:
-                    # הפעלת הצליל באמצעות JS
-                    st.components.v1.html("<script>parent.playSiren();</script>", height=0)
+                    # הפעלת הסירנה דרך JavaScript
+                    st.components.v1.html("<script>window.parent.playSiren();</script>", height=0)
                     
                     try:
                         df_mails = pd.read_excel(up_ex)
@@ -107,7 +114,6 @@ with center_col:
                         
                         for i, row in selected.iterrows():
                             comp = row['company']
-                            # מציאת מייל
                             try:
                                 client_email_row = df_mails[df_mails.iloc[:, 0].str.contains(comp, case=False, na=False)]
                                 recipient_email = str(client_email_row.iloc[0, 1])
@@ -124,7 +130,6 @@ with center_col:
                                 st.markdown('<div class="police-container"><div class="big-police-light"></div></div>', unsafe_allow_html=True)
                                 st.write(f"🕵️‍♂️ **Collecting from:** {comp}...")
                             
-                            # שליחת מייל (טמפלט עברית)
                             email_body = f"שלום,\nנכון להיום, התשלום עבור חודש {month_name} {year_val} טרם הוסדר..."
                             msg = MIMEMultipart()
                             msg['Subject'] = f"דרישת תשלום מיידית - {comp}"
@@ -138,7 +143,7 @@ with center_col:
                         server.quit()
                         status_msg.empty() 
                         st.balloons()
-                        st.success("Reminders sent!")
+                        st.success("Reminders sent successfully!")
                         time.sleep(2); st.rerun()
                         
                     except Exception as e: st.error(f"Error: {e}")
