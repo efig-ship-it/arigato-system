@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import re
 from datetime import datetime, timedelta, date
-from supabase import create_client
+from supabase import create_client 
+st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
 # --- 1. CONFIGURATION ---
 st.set_page_config(page_title="TMC Billing PRO", layout="wide")
@@ -124,3 +125,4 @@ if not df_quick.empty:
     col1.metric("Total Outstanding", f"${df_quick['balance'].sum():,.0f}")
     col2.metric("Overdue Count", len(df_quick[df_quick['status'] == 'Overdue']))
     col3.metric("Latest Sync", datetime.now().strftime("%H:%M:%S"))
+
