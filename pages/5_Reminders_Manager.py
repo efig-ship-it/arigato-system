@@ -9,7 +9,7 @@ from app import get_cloud_history, supabase
 # --- SIDEBAR BRANDING ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
-# --- CSS & ANIMATIONS (צ'קלקה ענקית ורוקדת) ---
+# --- CSS & ANIMATIONS (The Big Dancing Siren) ---
 st.markdown("""
     <style>
     .tuesday-header {
@@ -17,29 +17,19 @@ st.markdown("""
         color: #1E3A8A; font-size: 32px; font-weight: bold;
         letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
     }
-    
-    /* אנימציית הצ'קלקה הגדולה והזזה */
     .police-container {
         display: flex; justify-content: center; align-items: center; 
         padding: 40px; margin: 20px 0;
     }
     .big-police-light {
-        width: 200px;
-        height: 60px;
+        width: 200px; height: 60px;
         background: linear-gradient(90deg, #ff0000, #0000ff, #ff0000, #0000ff);
         background-size: 300% 300%;
         border-radius: 30px;
         box-shadow: 0 0 30px rgba(255, 0, 0, 0.8);
-        animation: 
-            police-flash 0.3s linear infinite, 
-            suitcase-move 1.5s infinite ease-in-out; /* אותה תנועה של המזוודה */
+        animation: police-flash 0.3s linear infinite, suitcase-move 1.5s infinite ease-in-out;
     }
-    
-    @keyframes police-flash {
-        0% { background-position: 0% 50%; }
-        100% { background-position: 100% 50%; }
-    }
-    
+    @keyframes police-flash { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
     @keyframes suitcase-move {
         0% { transform: scale(1) translateY(0); }
         50% { transform: scale(1.15) translateY(-30px); }
@@ -54,10 +44,14 @@ left_pad, center_col, right_pad = st.columns([0.1, 0.8, 0.1])
 with center_col:
     st.title("Reminders Manager 🚨")
     
+    # --- 1. LOAD DATA & MAILING LIST ---
+    st.subheader("1. Load Mailing List & Overdue Data")
+    up_ex = st.file_uploader("Upload Mailing List (Excel) to sync emails", type=['xlsx'])
+    
     df_history = get_cloud_history()
 
     if df_history.empty:
-        st.info("No billing history found.")
+        st.info("No billing history found in the cloud.")
     else:
         today = datetime.now().date()
         overdue_df = df_history[(df_history['status'] != 'Paid') & (df_history['due_date_obj'] < today)].copy()
@@ -77,45 +71,59 @@ with center_col:
 
             st.divider()
 
-            # הגדרות שליחה
-            st.subheader("Send Official Reminders")
-            target_emails = st.text_area("Recipient Emails (Separate with commas)", 
-                                        placeholder="client1@email.com, client2@email.com")
-
-            c_auth, c_guide = st.columns([1.5, 1])
+            # --- 2. AUTHENTICATION & DISPATCH ---
+            st.subheader("2. Execute Collection")
+            
+            c_auth, c_guide = st.columns([1.5, 1], gap="medium")
             with c_auth:
                 u_m = st.text_input("Gmail Account (Sender)")
                 u_p = st.text_input("App Password", type="password")
             with c_guide:
-                with st.expander("🔐 Guide", expanded=False):
+                with st.expander("🔐 Password Guide", expanded=True):
                     st.markdown("[Google App Passwords](https://myaccount.google.com/apppasswords)")
 
-            # כפתור השליחה עם הצ'קלקה הרוקדת
+            # --- EXECUTE ---
             if st.button("🚨 EXECUTE COLLECTION DISPATCH", use_container_width=True):
                 selected = edited_df[edited_df['Select'] == True]
                 
-                if selected.empty or not u_m or not u_p or not target_emails:
-                    st.error("Missing selection, credentials, or recipient emails.")
+                if selected.empty or not u_m or not u_p or not up_ex:
+                    st.error("Missing selection, credentials, or Mailing List Excel.")
                 else:
                     try:
+                        # קריאת האקסל כדי למצוא את המיילים
+                        df_mails = pd.read_excel(up_ex)
+                        
                         server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                         server.login(u_m.strip(), u_p.strip().replace(" ",""))
                         
                         status_msg = st.empty() 
-                        recipient_list = [e.strip() for e in target_emails.split(',') if '@' in e]
                         
                         for i, row in selected.iterrows():
+                            comp = row['company']
+                            
+                            # חיפוש המייל של החברה מתוך האקסל שהועלה
+                            # מניח שחברה בעמודה 1 ומייל בעמודה 2
+                            try:
+                                client_email_row = df_mails[df_mails.iloc[:, 0].str.contains(comp, case=False, na=False)]
+                                recipient_email = str(client_email_row.iloc[0, 1])
+                            except:
+                                recipient_email = None
+
+                            if not recipient_email or "@" not in recipient_email:
+                                st.error(f"Could not find valid email for {comp} in Excel.")
+                                continue
+
                             # חילוץ חודש ושנה
                             dt_obj = datetime.strptime(str(row['due_date']), "%Y-%m-%d")
                             month_name = dt_obj.strftime("%B")
                             year_val = dt_obj.year
                             
-                            # הצגת הצ'קלקה הגדולה והזזה
+                            # אנימציה
                             with status_msg.container():
                                 st.markdown('<div class="police-container"><div class="big-police-light"></div></div>', unsafe_allow_html=True)
-                                st.write(f"🕵️‍♂️ **Tuesday is collecting from:** {row['company']}...")
+                                st.write(f"🕵️‍♂️ **Tuesday is collecting from:** {comp} ({recipient_email})...")
                             
-                            # המייל מהחוזה
+                            # בניית המייל
                             email_body = f"""שלום,
 נכון להיום, התשלום עבור חודש {month_name} {year_val} טרם הוסדר, וזאת על אף שמועד התשלום חלף.
 דוח חשבוניות פתוחות לתשלום נשלח בתחילת החודש.
@@ -129,18 +137,18 @@ with center_col:
 Tuesday Team"""
 
                             msg = MIMEMultipart()
-                            msg['Subject'] = f"דרישת תשלום מיידית - {row['company']}"
-                            msg['To'] = ", ".join(recipient_list)
+                            msg['Subject'] = f"דרישת תשלום מיידית - {comp}"
+                            msg['To'] = recipient_email
                             msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
                             server.send_message(msg)
                             
-                            supabase.table("billing_history").update({"status": "Reminder Sent"}).eq("company", row['company']).eq("due_date", row['due_date']).execute()
+                            supabase.table("billing_history").update({"status": "Reminder Sent"}).eq("company", comp).eq("due_date", row['due_date']).execute()
                             time.sleep(1) 
                         
                         server.quit()
                         status_msg.empty() 
                         st.balloons()
-                        st.success("All reminders sent successfully!")
+                        st.success("All reminders sent successfully based on Excel list!")
                         time.sleep(2); st.rerun()
                         
                     except Exception as e: st.error(f"Error: {e}")
