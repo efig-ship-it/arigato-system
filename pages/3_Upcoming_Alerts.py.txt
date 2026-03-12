@@ -1,0 +1,20 @@
+import streamlit as st
+import pandas as pd
+import time
+from app import get_cloud_history
+
+st.title("Proactive T-7 Alerts 🔔")
+test_due = "2026-03-15"
+test_data = pd.DataFrame([{'Select': False, 'company': 'ARBITRIP', 'due_date': test_due, 'balance': 4500.0, 'id': 7771}, {'Select': False, 'company': 'ARBITRIP', 'due_date': test_due, 'balance': 2300.0, 'id': 7772}])
+st.info(f"Proactive Reminders for: **{test_due}**")
+sel_up = st.data_editor(test_data, hide_index=True, use_container_width=True)
+mf_up = st.file_uploader("Upload Mailing List to unlock", type=['xlsx'], key="up_f")
+
+can_send_up = (mf_up is not None) and (sel_up['Select'].any())
+if st.button("🚀 Send Proactive Reminders", use_container_width=True, disabled=not can_send_up):
+    sh_up = st.empty()
+    with sh_up.container():
+        st.markdown('<div class="bell-anim">🛎️</div>', unsafe_allow_html=True)
+        with st.spinner("Ringing the Proactive Bell..."):
+            time.sleep(2)
+    sh_up.empty(); st.success("Sent!"); st.rerun()
