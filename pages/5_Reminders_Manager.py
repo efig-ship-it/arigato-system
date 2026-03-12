@@ -9,14 +9,42 @@ from app import get_cloud_history, supabase
 # --- SIDEBAR BRANDING ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
-# --- CSS & ANIMATIONS (צ'קלקות בלבד) ---
+# --- CSS & ANIMATIONS (צ'קלקה ענקית ורוקדת) ---
 st.markdown("""
     <style>
-    .police-lights {
-        background: linear-gradient(90deg, rgba(255,0,0,1) 0%, rgba(0,0,255,1) 100%);
-        height: 8px; border-radius: 4px; animation: blinker 0.2s linear infinite; margin: 10px 0;
+    .tuesday-header {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        color: #1E3A8A; font-size: 32px; font-weight: bold;
+        letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
     }
-    @keyframes blinker { 50% { opacity: 0; } }
+    
+    /* אנימציית הצ'קלקה הגדולה והזזה */
+    .police-container {
+        display: flex; justify-content: center; align-items: center; 
+        padding: 40px; margin: 20px 0;
+    }
+    .big-police-light {
+        width: 200px;
+        height: 60px;
+        background: linear-gradient(90deg, #ff0000, #0000ff, #ff0000, #0000ff);
+        background-size: 300% 300%;
+        border-radius: 30px;
+        box-shadow: 0 0 30px rgba(255, 0, 0, 0.8);
+        animation: 
+            police-flash 0.3s linear infinite, 
+            suitcase-move 1.5s infinite ease-in-out; /* אותה תנועה של המזוודה */
+    }
+    
+    @keyframes police-flash {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 100% 50%; }
+    }
+    
+    @keyframes suitcase-move {
+        0% { transform: scale(1) translateY(0); }
+        50% { transform: scale(1.15) translateY(-30px); }
+        100% { transform: scale(1) translateY(0); }
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -37,7 +65,7 @@ with center_col:
         if overdue_df.empty:
             st.success("All clear! No overdue payments. ☕")
         else:
-            st.warning(f"Found {len(overdue_df)} Overdue Invoices.")
+            st.warning(f"🚨 ALERT: {len(overdue_df)} Overdue Invoices Detected!")
             
             overdue_df['Select'] = True
             edited_df = st.data_editor(
@@ -51,27 +79,30 @@ with center_col:
 
             # הגדרות שליחה
             st.subheader("Send Official Reminders")
+            target_emails = st.text_area("Recipient Emails (Separate with commas)", 
+                                        placeholder="client1@email.com, client2@email.com")
+
             c_auth, c_guide = st.columns([1.5, 1])
             with c_auth:
-                u_m = st.text_input("Gmail Account")
+                u_m = st.text_input("Gmail Account (Sender)")
                 u_p = st.text_input("App Password", type="password")
             with c_guide:
-                with st.expander("🔐 Guide"):
+                with st.expander("🔐 Guide", expanded=False):
                     st.markdown("[Google App Passwords](https://myaccount.google.com/apppasswords)")
 
-            # כפתור השליחה
+            # כפתור השליחה עם הצ'קלקה הרוקדת
             if st.button("🚨 EXECUTE COLLECTION DISPATCH", use_container_width=True):
                 selected = edited_df[edited_df['Select'] == True]
                 
-                if selected.empty or not u_m or not u_p:
-                    st.error("Missing selection or credentials.")
+                if selected.empty or not u_m or not u_p or not target_emails:
+                    st.error("Missing selection, credentials, or recipient emails.")
                 else:
                     try:
                         server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
                         server.login(u_m.strip(), u_p.strip().replace(" ",""))
                         
-                        # הנה החלק של הספינר והצ'קלקה - רק בזמן השליחה!
                         status_msg = st.empty() 
+                        recipient_list = [e.strip() for e in target_emails.split(',') if '@' in e]
                         
                         for i, row in selected.iterrows():
                             # חילוץ חודש ושנה
@@ -79,12 +110,12 @@ with center_col:
                             month_name = dt_obj.strftime("%B")
                             year_val = dt_obj.year
                             
-                            # הצגת הצ'קלקה והסטטוס
+                            # הצגת הצ'קלקה הגדולה והזזה
                             with status_msg.container():
-                                st.markdown('<div class="police-lights"></div>', unsafe_allow_html=True)
+                                st.markdown('<div class="police-container"><div class="big-police-light"></div></div>', unsafe_allow_html=True)
                                 st.write(f"🕵️‍♂️ **Tuesday is collecting from:** {row['company']}...")
                             
-                            # בניית המייל
+                            # המייל מהחוזה
                             email_body = f"""שלום,
 נכון להיום, התשלום עבור חודש {month_name} {year_val} טרם הוסדר, וזאת על אף שמועד התשלום חלף.
 דוח חשבוניות פתוחות לתשלום נשלח בתחילת החודש.
@@ -99,18 +130,17 @@ Tuesday Team"""
 
                             msg = MIMEMultipart()
                             msg['Subject'] = f"דרישת תשלום מיידית - {row['company']}"
-                            msg['To'] = u_m # כאן מומלץ להחליף למייל הלקוח
+                            msg['To'] = ", ".join(recipient_list)
                             msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
                             server.send_message(msg)
                             
-                            # עדכון דאטה בייס
                             supabase.table("billing_history").update({"status": "Reminder Sent"}).eq("company", row['company']).eq("due_date", row['due_date']).execute()
-                            time.sleep(1) # רק כדי שתספיק לראות את הצ'קלקה עובדת
+                            time.sleep(1) 
                         
                         server.quit()
-                        status_msg.empty() # מעלים את הצ'קלקה בסיום
+                        status_msg.empty() 
                         st.balloons()
-                        st.success("All reminders sent!")
+                        st.success("All reminders sent successfully!")
                         time.sleep(2); st.rerun()
                         
                     except Exception as e: st.error(f"Error: {e}")
