@@ -1,27 +1,15 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, base64
+import smtplib, time
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app import get_cloud_history, supabase
 
-# --- פונקציית הזרקת סאונד עוקפת חסימות ---
-def play_siren_forcefully():
-    audio_url = "https://www.soundjay.com/misc/sounds/siren-1.mp3"
-    audio_html = f"""
-        <iframe src="{audio_url}" allow="autoplay" style="display:none" id="iframeAudio">
-        </iframe>
-        <audio autoplay>
-            <source src="{audio_url}" type="audio/mp3">
-        </audio>
-    """
-    st.markdown(audio_html, unsafe_allow_html=True)
-
 # --- SIDEBAR BRANDING ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
-# --- CSS & ANIMATIONS (מיתוג Tuesday + צ'קלקה רוקדת) ---
+# --- CSS & ANIMATIONS ---
 st.markdown("""
     <style>
     .tuesday-header {
@@ -50,15 +38,27 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- CENTRAL LAYOUT (ריכוז לאורך) ---
+# --- CENTRAL LAYOUT ---
 left_pad, center_col, right_pad = st.columns([0.1, 0.8, 0.1])
 
 with center_col:
     st.title("Reminders Manager 🚨")
     
-    # --- 1. LOAD DATA & MAILING LIST ---
+    # --- AUDIO ACTIVATION BUTTON ---
+    # כפתור חובה כדי "להעיר" את הדפדפן לסאונד
+    if st.button("🔈 Activate Siren System (Click before Dispatch)"):
+        st.components.v1.html("""
+            <audio autoplay>
+                <source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mp3">
+            </audio>
+        """, height=0)
+        st.success("Siren System Armed! 🚨")
+
+    st.divider()
+
+    # --- 1. LOAD DATA ---
     st.subheader("1. Load Mailing List & Overdue Data")
-    up_ex = st.file_uploader("Upload Mailing List (Excel) to sync emails", type=['xlsx'])
+    up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
     
     df_history = get_cloud_history()
 
@@ -83,9 +83,8 @@ with center_col:
 
             st.divider()
 
-            # --- 2. AUTHENTICATION & GUIDE (Side-by-Side) ---
+            # --- 2. AUTHENTICATION & DISPATCH ---
             st.subheader("2. Execute Collection")
-            
             c_auth, c_guide = st.columns([1.5, 1], gap="medium")
             with c_auth:
                 u_m = st.text_input("Gmail Account (Sender)")
@@ -101,8 +100,12 @@ with center_col:
                 if selected.empty or not u_m or not u_p or not up_ex:
                     st.error("Missing selection, credentials, or Mailing List Excel.")
                 else:
-                    # הפעלת הסאונד ברגע הלחיצה
-                    play_siren_forcefully()
+                    # הזרקת הסירנה ברגע הלחיצה
+                    st.components.v1.html("""
+                        <audio autoplay loop>
+                            <source src="https://www.soundjay.com/misc/sounds/siren-1.mp3" type="audio/mp3">
+                        </audio>
+                    """, height=0)
                     
                     try:
                         df_mails = pd.read_excel(up_ex)
@@ -113,8 +116,6 @@ with center_col:
                         
                         for i, row in selected.iterrows():
                             comp = row['company']
-                            
-                            # שליפת מייל לקוח מהאקסל
                             try:
                                 client_email_row = df_mails[df_mails.iloc[:, 0].str.contains(comp, case=False, na=False)]
                                 recipient_email = str(client_email_row.iloc[0, 1])
@@ -123,7 +124,6 @@ with center_col:
                             if not recipient_email or "@" not in recipient_email:
                                 continue
 
-                            # חילוץ חודש ושנה לטמפלט
                             dt_obj = datetime.strptime(str(row['due_date']), "%Y-%m-%d")
                             month_name = dt_obj.strftime("%B")
                             year_val = dt_obj.year
@@ -133,7 +133,7 @@ with center_col:
                                 st.markdown('<div class="police-container"><div class="big-police-light"></div></div>', unsafe_allow_html=True)
                                 st.write(f"🕵️‍♂️ **Tuesday is collecting from:** {comp}...")
                             
-                            # בניית המייל (טמפלט עברית)
+                            # בניית המייל
                             email_body = f"""שלום,
 נכון להיום, התשלום עבור חודש {month_name} {year_val} טרם הוסדר, וזאת על אף שמועד התשלום חלף.
 דוח חשבוניות פתוחות לתשלום נשלח בתחילת החודש.
@@ -152,9 +152,8 @@ Tuesday Team"""
                             msg.attach(MIMEText(email_body, 'plain', 'utf-8'))
                             server.send_message(msg)
                             
-                            # עדכון דאטה בייס
                             supabase.table("billing_history").update({"status": "Reminder Sent"}).eq("company", comp).eq("due_date", row['due_date']).execute()
-                            time.sleep(1.5) # השהייה קלה לסנכרון האנימציה
+                            time.sleep(2) # השהייה כדי להרגיש את המבצע
                         
                         server.quit()
                         status_msg.empty() 
