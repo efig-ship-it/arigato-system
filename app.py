@@ -41,8 +41,8 @@ st.markdown("""
         background-color: #F0FFF4; border: 2px solid #68D391; padding: 25px; border-radius: 15px; text-align: center;
     }
     .last-action-box {
-        background-color: #F1F5F9; border-right: 5px solid #1E3A8A; padding: 20px; margin-bottom: 30px; border-radius: 10px;
-        direction: rtl; text-align: right; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        background-color: #F1F5F9; border-left: 5px solid #1E3A8A; padding: 20px; margin-bottom: 30px; border-radius: 10px;
+        text-align: left; box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
     .red-val { color: #E53E3E; font-weight: bold; font-size: 36px; margin: 0; }
     .green-val { color: #38A169; font-weight: bold; font-size: 36px; margin: 0; }
@@ -61,7 +61,7 @@ with home_col:
     df = get_cloud_history()
     
     if not df.empty:
-        # --- חישובי מדדים ---
+        # --- CALCULATIONS ---
         today = datetime.now().date()
         next_week = today + timedelta(days=7)
         
@@ -72,47 +72,47 @@ with home_col:
         total_overdue = df[(df['status'] != 'Paid') & (df['due_date_obj'] < today)]['balance'].sum()
         forecast_7d = df[(df['status'] != 'Paid') & (df['due_date_obj'] >= today) & (df['due_date_obj'] <= next_week)]['balance'].sum()
 
-        # שורת פעילות אחרונה (בלי הרשימה למטה)
+        # --- LAST ACTION BOX ---
         last_entry = df.iloc[0]
         st.markdown(f"""
             <div class="last-action-box">
-                <span style="font-size: 18px;">🕒 <b>פעילות אחרונה במערכת:</b></span><br>
-                השולח: <b>{last_entry.get('sender', 'System')}</b> | 
-                לקוח: <b>{last_entry['company']}</b> | 
-                סכום: <b>₪{last_entry['amount']:,.0f}</b> | 
-                בתאריך: <b>{last_entry['date']}</b>
+                <span style="font-size: 18px;">🕒 <b>Latest System Activity:</b></span><br>
+                Sender: <b>{last_entry.get('sender', 'System')}</b> | 
+                Client: <b>{last_entry['company']}</b> | 
+                Amount: <b>${last_entry['amount']:,.0f}</b> | 
+                Date: <b>{last_entry['date']}</b>
             </div>
         """, unsafe_allow_html=True)
 
-        # תצוגת הקארדים המודגשים (אדום וירוק)
+        # --- HIGHLIGHT CARDS ---
         col_red, col_green = st.columns(2)
         with col_red:
             st.markdown(f"""
                 <div class="overdue-card">
                     <p class="metric-label">🚨 Total Overdue</p>
-                    <p class="red-val">₪{total_overdue:,.0f}</p>
+                    <p class="red-val">${total_overdue:,.0f}</p>
                 </div>
             """, unsafe_allow_html=True)
         with col_green:
             st.markdown(f"""
                 <div class="forecast-card">
                     <p class="metric-label">🟢 Next 7d Forecast</p>
-                    <p class="green-val">₪{forecast_7d:,.0f}</p>
+                    <p class="green-val">${forecast_7d:,.0f}</p>
                 </div>
             """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # מדדי סיכום (Metrics)
-        st.subheader("📊 סיכום פיננסי")
+        # --- GENERAL SUMMARY METRICS ---
+        st.subheader("📊 Financial Summary")
         m1, m2, m3 = st.columns(3)
-        m1.metric("סה\"כ נשלח לגבייה", f"₪{total_invoiced:,.0f}")
-        m2.metric("סה\"כ התקבל (שולם)", f"₪{total_received:,.0f}", delta=f"{(total_received/total_invoiced*100):.1f}%")
-        m3.metric("תזכורות שנשלחו", f"{reminders_sent}")
+        m1.metric("Total Invoiced", f"${total_invoiced:,.0f}")
+        m2.metric("Total Collected", f"${total_received:,.0f}", delta=f"{(total_received/total_invoiced*100):.1f}% Rate")
+        m3.metric("Reminders Dispatched", f"{reminders_sent}")
 
     else:
-        st.info("אין נתונים זמינים כרגע. התחל לשלוח חשבוניות כדי לראות את הדשבורד.")
+        st.info("No data available yet. Start by sending your first invoice.")
 
     st.divider()
-    if st.button("🔄 רענן וסנכרן נתונים"):
+    if st.button("🔄 Sync & Refresh Data", use_container_width=True):
         st.rerun()
