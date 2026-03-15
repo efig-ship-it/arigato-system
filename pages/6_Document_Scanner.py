@@ -38,7 +38,7 @@ def add_log_entry(record_id, note_text):
     except Exception as e:
         st.error(f"Error updating notes: {e}")
 
-# --- 2. LOGIC: EXTRACTING DATA FROM PDF ---
+# --- 2. LOGIC: SMART ICOUNT SCANNER ---
 def scan_receipt(file):
     text = ""
     try:
@@ -46,10 +46,18 @@ def scan_receipt(file):
             for page in pdf.pages:
                 text += page.extract_text() + "\n"
         
-        # חיפוש סכום (תומך בעברית ואנגלית)
-        amount_match = re.search(r"(?:סה\"כ|שולם|Total|Amount)[:\s]*₪?([\d,]+\.?\d*)", text)
-        amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+        # חיפוש סכום בשקלים בלבד (₪) - פותר בעיית מטבע חוץ ב-iCount
+        # מחפש סימן שקל ואחריו מספרים עם פסיק/נקודה
+        amounts = re.findall(r"₪\s?([\d,]+\.\d{2})", text)
         
+        if amounts:
+            # לוקח את הסכום האחרון שמופיע (בדרך כלל ה-Grand Total בתחתית)
+            amount = float(amounts[-1].replace(',', ''))
+        else:
+            # גיבוי: חיפוש לפי מילות מפתח של iCount אם לא נמצא סימן ₪
+            match = re.search(r"(?:סה\"כ שולם|סה\"כ כולל מע\"מ|שולם|Total|Amount)[:\s]*₪?([\d,]+\.?\d*)", text)
+            amount = float(match.group(1).replace(',', '')) if match else 0.0
+            
         return text, amount
     except:
         return "", 0.0
@@ -75,7 +83,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("Bulk Receipt Sync 🧾")
-st.write("Upload iCount receipts to automatically update the Control Center.")
+st.write("גררו לכאן את קבצי ה-PDF של iCount (קבלות/חשבוניות) לעדכון אוטומטי של המערכת.")
 
 # --- 4. MAIN INTERFACE ---
 uploaded_files = st.file_uploader("Drop iCount PDFs here", type="pdf", accept_multiple_files=True)
@@ -88,7 +96,7 @@ if uploaded_files:
             with st.spinner(f"Analyzing {uploaded_file.name}..."):
                 raw_text, amt = scan_receipt(uploaded_file)
                 
-                # זיהוי חברה
+                # זיהוי חברה מתוך הטקסט
                 found_company = None
                 for comp in df_cloud['company'].unique():
                     if comp.lower() in raw_text.lower():
@@ -96,35 +104,36 @@ if uploaded_files:
                         break
                 
                 if found_company and amt > 0:
-                    # חישוב התאמה (שם חברה + סכום זהה + לא שולם)
+                    # חיפוש התאמה ב-Supabase (חברה + סכום זהה + לא שולם)
+                    # הוספנו מרווח ביטחון קטן לסכום (Round) למקרה של עיגול אגורות
                     match = df_cloud[
                         (df_cloud['company'] == found_company) & 
                         (df_cloud['status'] != 'Paid') & 
-                        (df_cloud['amount'] == amt)
+                        (df_cloud['amount'].round(2) == round(amt, 2))
                     ]
                     
                     if not match.empty:
                         target = match.iloc[0]
                         sid = target['id']
                         
-                        # עדכון ב-Supabase
+                        # עדכון ב-Supabase לסגירת החוב
                         supabase.table("billing_history").update({
                             "received_amount": amt,
                             "status": "Paid",
                             "balance": 0
                         }).eq("id", sid).execute()
                         
-                        add_log_entry(sid, f"🤖 Auto-Sync: Receipt matched from {uploaded_file.name} (${amt})")
+                        add_log_entry(sid, f"🤖 Auto-Sync: Receipt matched from {uploaded_file.name} (₪{amt:,.2f})")
                         
                         st.markdown(f"""<div class="sync-card match-success">
-                            <b>✅ {found_company}</b>: Receipt for ${amt:,.2f} matched and record updated to Paid.
+                            <b>✅ {found_company}</b>: זוהתה התאמה! החוב על סך ₪{amt:,.2f} עודכן כבוצע.
                         </div>""", unsafe_allow_html=True)
                     else:
                         st.markdown(f"""<div class="sync-card match-error">
-                            <b>⚠️ {found_company}</b>: Found receipt for ${amt:,.2f}, but no matching open invoice found in Control Center.
+                            <b>⚠️ {found_company}</b>: נמצאה קבלה על סך ₪{amt:,.2f}, אך לא נמצאה חשבונית פתוחה תואמת במערכת.
                         </div>""", unsafe_allow_html=True)
                 else:
-                    st.error(f"Could not identify company or amount in: {uploaded_file.name}")
+                    st.error(f"לא הצלחתי לזהות חברה או סכום תקין בקובץ: {uploaded_file.name}")
 
         if st.button("View Updated Control Center"):
             st.switch_page("pages/4_Collections_Control.py")
