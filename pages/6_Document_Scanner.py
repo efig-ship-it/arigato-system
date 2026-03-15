@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+import pdfplumber
+import re
 import time
 from datetime import datetime
 from supabase import create_client
@@ -13,125 +15,76 @@ def init_connection():
 
 supabase = init_connection()
 
-# פונקציית שליפה ללא Cache כדי לאפשר עדכון בלחיצת כפתור
-def get_cloud_history():
-    res = supabase.table("billing_history").select("*").order("date", desc=True).execute()
-    df = pd.DataFrame(res.data)
-    if not df.empty:
-        df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
-        df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0.0)
-        df['balance'] = df['amount'] - df['received_amount']
-        df['due_date_display'] = pd.to_datetime(df['due_date'], errors='coerce').dt.strftime('%d/%m/%Y')
-        # המרה לאובייקט תאריך לצורך חישובים פנימיים
-        df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
-    return df
+def get_open_invoices():
+    res = supabase.table("billing_history").select("*").neq("status", "Paid").execute()
+    return pd.DataFrame(res.data)
 
-def add_log_entry(record_id, note_text):
+def scan_receipt(file):
+    text = ""
     try:
-        res = supabase.table("billing_history").select("notes").eq("id", record_id).single().execute()
-        current_notes = res.data.get("notes", "") if res.data else ""
-        if current_notes is None: current_notes = ""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        new_entry = f"[{timestamp}] {note_text}"
-        updated_notes = f"{current_notes}\n{new_entry}" if current_notes else new_entry
-        supabase.table("billing_history").update({"notes": updated_notes}).eq("id", record_id).execute()
-    except: pass
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() + "\n"
+        amounts = re.findall(r"₪\s?([\d,]+\.\d{2})", text)
+        amount = float(amounts[-1].replace(',', '')) if amounts else 0.0
+        return text, amount
+    except:
+        return "", 0.0
 
-# --- 2. UI STYLE ---
-st.set_page_config(page_title="Tuesday | Control Center", layout="wide")
-st.markdown("""
-    <style>
-    .tuesday-header {
-        font-family: 'Helvetica Neue', Arial, sans-serif;
-        color: #1E3A8A; font-size: 32px; font-weight: bold;
-        letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# --- 2. UI ---
+st.set_page_config(page_title="Tuesday | Smart Sync", layout="wide")
+st.title("Smart Receipt Sync 🧾")
 
-# כותרת וכפתור עדכון בשורה אחת
-c1, c2 = st.columns([4, 1])
-with c1:
-    st.title("Operations Control 🔍")
-with c2:
-    if st.button("🔄 עדכן נתונים", use_container_width=True):
-        st.cache_resource.clear() # מנקה את החיבור
-        st.rerun()
+uploaded_files = st.file_uploader("העלה קבלות לסריקה", type="pdf", accept_multiple_files=True)
 
-# --- 3. MAIN TABLE ---
-df_raw = get_cloud_history()
-
-if not df_raw.empty:
-    # פילטרים
-    f1, f2 = st.columns([2,1])
-    with f1: c_sel = st.multiselect("חפש חברה:", sorted(df_raw['company'].unique()))
-    with f2: s_sel = st.multiselect("סינון סטטוס:", sorted(df_raw['status'].unique()))
-
-    f_df = df_raw.copy()
-    if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
-    if s_sel: f_df = f_df[f_df['status'].isin(s_sel)]
-
-    def highlight_st(val):
-        if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
-        if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
-        if val == 'Partial': return 'background-color: #e3f2fd; color: #0d47a1; font-weight: bold;'
-        if val == 'Sent Reminder': return 'background-color: #fef3c7; color: #92400e; font-weight: bold;'
-        return ''
-
-    view_cols = ['id', 'company', 'date', 'due_date_display', 'amount', 'received_amount', 'status']
-    st.dataframe(
-        f_df[view_cols].style.applymap(highlight_st, subset=['status']).format({
-            'amount': '₪{:,.2f}',
-            'received_amount': '₪{:,.2f}'
-        }),
-        use_container_width=True, hide_index=True
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # --- 4. ACTIONS (Expanders) ---
-    with st.expander("⚡ Batch Execute (עדכון מהיר ב-V)", expanded=False):
-        bulk_df = f_df[['id', 'company', 'due_date_display', 'amount', 'received_amount']].copy()
-        bulk_df['Select'] = False
-        edited_df = st.data_editor(
-            bulk_df,
-            column_config={
-                "Select": st.column_config.CheckboxColumn("בחר", default=False),
-                "id": None, "amount": st.column_config.NumberColumn("סכום", format="₪%.2f"),
-                "received_amount": st.column_config.NumberColumn("התקבל", format="₪%.2f")
-            },
-            hide_index=True, use_container_width=True
-        )
-
-        if st.button("🚀 סגור את כל המסומנים כ-'שולם'", use_container_width=True):
-            to_update = edited_df[edited_df['Select'] == True]
-            if not to_update.empty:
-                for _, row in to_update.iterrows():
-                    supabase.table("billing_history").update({
-                        "status": "Paid", "received_amount": float(row['amount'])
-                    }).eq("id", int(row['id'])).execute()
-                    add_log_entry(row['id'], f"Batch Update: Paid ₪{row['amount']}")
-                st.success(f"עודכנו {len(to_update)} רשומות!")
-                time.sleep(1); st.rerun()
-
-    with st.expander("📝 Manual Update & Audit (הערות ועדכון פרטני)", expanded=False):
-        sel_name = st.selectbox("בחר חברה:", ["בחר..."] + sorted(f_df['company'].unique().tolist()))
-        if sel_name != "בחר...":
-            sub_df = f_df[f_df['company'] == sel_name]
-            sel_rec = st.selectbox("בחר עסקה:", sub_df.apply(lambda r: f"ID: {r['id']} | {r['date']} | ₪{r['amount']}", axis=1))
-            sid = int(sel_rec.split(":")[1].split("|")[0].strip())
-            row_data = df_raw[df_raw['id'] == sid].iloc[0]
+if uploaded_files:
+    df_open = get_open_invoices()
+    
+    for uploaded_file in uploaded_files:
+        with st.container():
+            st.markdown(f"### סריקת קובץ: {uploaded_file.name}")
+            raw_text, receipt_amt = scan_receipt(uploaded_file)
             
-            st.info(row_data['notes'] if row_data['notes'] else "אין הערות.")
-            c1, c2, c3 = st.columns([2, 1, 1])
-            with c1: new_note = st.text_input("הערה חדשה:")
-            with c2: rec_val = st.number_input("סכום שהתקבל:", value=float(row_data['received_amount']))
-            with c3: new_stat = st.selectbox("סטטוס:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], 
-                                           index=["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"].index(row_data['status']))
-            
-            if st.button("שמור שינויים", use_container_width=True):
-                supabase.table("billing_history").update({"status": new_stat, "received_amount": float(rec_val)}).eq("id", sid).execute()
-                if new_note: add_log_entry(sid, new_note)
-                st.success("עודכן!"); time.sleep(0.5); st.rerun()
-else:
-    st.info("אין נתונים להצגה.")
+            if receipt_amt > 0:
+                # זיהוי חברה
+                found_company = None
+                if not df_open.empty:
+                    for comp in df_open['company'].unique():
+                        if str(comp).lower() in raw_text.lower():
+                            found_company = comp
+                            break
+                
+                # תצוגת הממצאים למשתמש
+                col1, col2 = st.columns(2)
+                col1.metric("סכום שזוהה", f"₪{receipt_amt:,.2f}")
+                col2.metric("חברה משוייכת", found_company if found_company else "לא זוהה")
+
+                if found_company:
+                    # מציאת השורה הרלוונטית
+                    rel = df_open[df_open['company'] == found_company].sort_values(by='date').iloc[0]
+                    
+                    st.warning(f"המערכת מוכנה לעדכן את {found_company} (חוב נוכחי: ₪{float(rel['amount']):,.2f})")
+                    
+                    # --- הכפתור שביקשת ---
+                    # רק בלחיצה עליו העדכון יבוצע בפועל
+                    if st.button(f"🚀 אשר ועדכן קונטרול - {found_company}", key=f"sync_{rel['id']}"):
+                        new_rec = float(rel['received_amount'] or 0) + receipt_amt
+                        new_stat = "Paid" if new_rec >= float(rel['amount']) else "Partial"
+                        
+                        supabase.table("billing_history").update({
+                            "received_amount": new_rec,
+                            "status": new_stat,
+                            "notes": f"עודכן מסריקה: {uploaded_file.name} ({datetime.now().strftime('%d/%m/%Y')})"
+                        }).eq("id", rel['id']).execute()
+                        
+                        st.success(f"עודכן בהצלחה! {found_company} בסטטוס {new_stat}")
+                        time.sleep(1)
+                        st.rerun()
+                else:
+                    st.error("לא נמצאה חברה תואמת בקונטרול. וודא ששם החברה מופיע בטקסט של הקבלה.")
+            else:
+                st.error("לא הצלחתי לחלץ סכום מהקובץ הזה.")
+            st.divider()
+
+if st.button("חזרה לקונטרול (עמוד 4)"):
+    st.switch_page("pages/4_Operations_Control.py")
