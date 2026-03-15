@@ -1,13 +1,10 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber
-import re
 import time
 from datetime import datetime
 from supabase import create_client
 
-# --- 1. CORE FUNCTIONS (עצמאי למניעת שגיאות Import) ---
-
+# --- 1. CORE FUNCTIONS ---
 @st.cache_resource
 def init_connection():
     u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
@@ -16,14 +13,17 @@ def init_connection():
 
 supabase = init_connection()
 
+# פונקציית שליפה ללא Cache כדי לאפשר עדכון בלחיצת כפתור
 def get_cloud_history():
     res = supabase.table("billing_history").select("*").order("date", desc=True).execute()
     df = pd.DataFrame(res.data)
     if not df.empty:
-        df['amount'] = df['amount'].astype(float)
-        df['received_amount'] = df['received_amount'].astype(float)
+        df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
+        df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0.0)
         df['balance'] = df['amount'] - df['received_amount']
-        df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+        df['due_date_display'] = pd.to_datetime(df['due_date'], errors='coerce').dt.strftime('%d/%m/%Y')
+        # המרה לאובייקט תאריך לצורך חישובים פנימיים
+        df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
     return df
 
 def add_log_entry(record_id, note_text):
@@ -37,32 +37,8 @@ def add_log_entry(record_id, note_text):
         supabase.table("billing_history").update({"notes": updated_notes}).eq("id", record_id).execute()
     except: pass
 
-# --- 2. SMART ICOUNT SCANNER ---
-def scan_receipt(file):
-    text = ""
-    try:
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                text += page.extract_text() + "\n"
-        
-        # חיפוש סכום בשקלים (₪) - לוקח את האחרון שמופיע (הסכום הסופי בשורה התחתונה)
-        amounts = re.findall(r"₪\s?([\d,]+\.\d{2})", text)
-        if amounts:
-            amount = float(amounts[-1].replace(',', ''))
-        else:
-            # גיבוי במידה ואין סימן ₪
-            match = re.search(r"(?:סה\"כ שולם|סה\"כ כולל מע\"מ|Total|Amount)[:\s]*₪?([\d,]+\.\d{2})", text)
-            amount = float(match.group(1).replace(',', '')) if match else 0.0
-            
-        return text, amount
-    except:
-        return "", 0.0
-
-# --- 3. UI & STYLE ---
-st.set_page_config(page_title="Tuesday | Smart Receipt Sync", page_icon="🧾", layout="wide")
-
-st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
-
+# --- 2. UI STYLE ---
+st.set_page_config(page_title="Tuesday | Control Center", layout="wide")
 st.markdown("""
     <style>
     .tuesday-header {
@@ -70,87 +46,92 @@ st.markdown("""
         color: #1E3A8A; font-size: 32px; font-weight: bold;
         letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
     }
-    .sync-card {
-        padding: 15px; border-radius: 10px; margin-bottom: 10px; border-right: 5px solid;
-    }
-    .match-success { background-color: #f0fdf4; border-color: #22c55e; color: #166534; }
-    .match-partial { background-color: #eff6ff; border-color: #3b82f6; color: #1e40af; }
-    .match-error { background-color: #fef2f2; border-color: #ef4444; color: #991b1b; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Flexible Receipt Sync 🧾")
-st.write("מערכת סריקה חכמה: הכסף מהקבלה יחולק אוטומטית בין החובות הפתוחים של הלקוח.")
+# כותרת וכפתור עדכון בשורה אחת
+c1, c2 = st.columns([4, 1])
+with c1:
+    st.title("Operations Control 🔍")
+with c2:
+    if st.button("🔄 עדכן נתונים", use_container_width=True):
+        st.cache_resource.clear() # מנקה את החיבור
+        st.rerun()
 
-# --- 4. MAIN INTERFACE ---
-uploaded_files = st.file_uploader("Upload iCount Receipts (PDF)", type="pdf", accept_multiple_files=True)
+# --- 3. MAIN TABLE ---
+df_raw = get_cloud_history()
 
-if uploaded_files:
-    df_cloud = get_cloud_history()
-    
-    if not df_cloud.empty:
-        for uploaded_file in uploaded_files:
-            with st.spinner(f"סורק את {uploaded_file.name}..."):
-                raw_text, receipt_total = scan_receipt(uploaded_file)
-                
-                # זיהוי חברה
-                found_company = None
-                for comp in df_cloud['company'].unique():
-                    if comp.lower() in raw_text.lower():
-                        found_company = comp
-                        break
-                
-                if found_company and receipt_total > 0:
-                    # מציאת כל החובות הפתוחים של החברה (מסודר מהישן לחדש)
-                    open_invoices = df_cloud[
-                        (df_cloud['company'] == found_company) & 
-                        (df_cloud['status'] != 'Paid')
-                    ].sort_values(by='date_dt', ascending=True)
-                    
-                    if not open_invoices.empty:
-                        remaining_money = receipt_total
-                        updated_count = 0
-                        
-                        for _, inv in open_invoices.iterrows():
-                            if remaining_money <= 0: break
-                            
-                            inv_id = inv['id']
-                            current_balance = inv['balance']
-                            
-                            if remaining_money >= current_balance:
-                                # הקבלה מכסה את כל החוב הספציפי הזה
-                                payment_to_apply = current_balance
-                                new_received = inv['amount'] # סגירה מלאה
-                                new_status = "Paid"
-                                remaining_money -= current_balance
-                            else:
-                                # הקבלה מכסה רק חלק מהחוב הזה
-                                payment_to_apply = remaining_money
-                                new_received = inv['received_amount'] + remaining_money
-                                new_status = "Partial"
-                                remaining_money = 0
-                            
-                            # עדכון ב-Supabase
-                            supabase.table("billing_history").update({
-                                "received_amount": new_received,
-                                "status": new_status
-                            }).eq("id", inv_id).execute()
-                            
-                            add_log_entry(inv_id, f"Auto-Sync: Applied ₪{payment_to_apply:,.2f} from {uploaded_file.name}")
-                            updated_count += 1
-                        
-                        # הודעת הצלחה מפורטת
-                        msg_type = "match-success" if remaining_money == 0 else "match-partial"
-                        st.markdown(f"""<div class="sync-card {msg_type}">
-                            <b>✅ {found_company}</b>: שוייך סכום של ₪{receipt_total:,.2f} עבור {updated_count} חשבוניות פתוחות.
-                        </div>""", unsafe_allow_html=True)
-                        
-                    else:
-                        st.markdown(f"""<div class="sync-card match-error">
-                            <b>⚠️ {found_company}</b>: נמצאה קבלה על סך ₪{receipt_total:,.2f}, אך לא קיימים חובות פתוחים במערכת.
-                        </div>""", unsafe_allow_html=True)
-                else:
-                    st.error(f"לא הצלחתי לזהות חברה או סכום בקובץ: {uploaded_file.name}")
+if not df_raw.empty:
+    # פילטרים
+    f1, f2 = st.columns([2,1])
+    with f1: c_sel = st.multiselect("חפש חברה:", sorted(df_raw['company'].unique()))
+    with f2: s_sel = st.multiselect("סינון סטטוס:", sorted(df_raw['status'].unique()))
 
-        if st.button("Refresh Control Center"):
-            st.switch_page("pages/4_Collections_Control.py")
+    f_df = df_raw.copy()
+    if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
+    if s_sel: f_df = f_df[f_df['status'].isin(s_sel)]
+
+    def highlight_st(val):
+        if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
+        if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
+        if val == 'Partial': return 'background-color: #e3f2fd; color: #0d47a1; font-weight: bold;'
+        if val == 'Sent Reminder': return 'background-color: #fef3c7; color: #92400e; font-weight: bold;'
+        return ''
+
+    view_cols = ['id', 'company', 'date', 'due_date_display', 'amount', 'received_amount', 'status']
+    st.dataframe(
+        f_df[view_cols].style.applymap(highlight_st, subset=['status']).format({
+            'amount': '₪{:,.2f}',
+            'received_amount': '₪{:,.2f}'
+        }),
+        use_container_width=True, hide_index=True
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- 4. ACTIONS (Expanders) ---
+    with st.expander("⚡ Batch Execute (עדכון מהיר ב-V)", expanded=False):
+        bulk_df = f_df[['id', 'company', 'due_date_display', 'amount', 'received_amount']].copy()
+        bulk_df['Select'] = False
+        edited_df = st.data_editor(
+            bulk_df,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("בחר", default=False),
+                "id": None, "amount": st.column_config.NumberColumn("סכום", format="₪%.2f"),
+                "received_amount": st.column_config.NumberColumn("התקבל", format="₪%.2f")
+            },
+            hide_index=True, use_container_width=True
+        )
+
+        if st.button("🚀 סגור את כל המסומנים כ-'שולם'", use_container_width=True):
+            to_update = edited_df[edited_df['Select'] == True]
+            if not to_update.empty:
+                for _, row in to_update.iterrows():
+                    supabase.table("billing_history").update({
+                        "status": "Paid", "received_amount": float(row['amount'])
+                    }).eq("id", int(row['id'])).execute()
+                    add_log_entry(row['id'], f"Batch Update: Paid ₪{row['amount']}")
+                st.success(f"עודכנו {len(to_update)} רשומות!")
+                time.sleep(1); st.rerun()
+
+    with st.expander("📝 Manual Update & Audit (הערות ועדכון פרטני)", expanded=False):
+        sel_name = st.selectbox("בחר חברה:", ["בחר..."] + sorted(f_df['company'].unique().tolist()))
+        if sel_name != "בחר...":
+            sub_df = f_df[f_df['company'] == sel_name]
+            sel_rec = st.selectbox("בחר עסקה:", sub_df.apply(lambda r: f"ID: {r['id']} | {r['date']} | ₪{r['amount']}", axis=1))
+            sid = int(sel_rec.split(":")[1].split("|")[0].strip())
+            row_data = df_raw[df_raw['id'] == sid].iloc[0]
+            
+            st.info(row_data['notes'] if row_data['notes'] else "אין הערות.")
+            c1, c2, c3 = st.columns([2, 1, 1])
+            with c1: new_note = st.text_input("הערה חדשה:")
+            with c2: rec_val = st.number_input("סכום שהתקבל:", value=float(row_data['received_amount']))
+            with c3: new_stat = st.selectbox("סטטוס:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], 
+                                           index=["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"].index(row_data['status']))
+            
+            if st.button("שמור שינויים", use_container_width=True):
+                supabase.table("billing_history").update({"status": new_stat, "received_amount": float(rec_val)}).eq("id", sid).execute()
+                if new_note: add_log_entry(sid, new_note)
+                st.success("עודכן!"); time.sleep(0.5); st.rerun()
+else:
+    st.info("אין נתונים להצגה.")
