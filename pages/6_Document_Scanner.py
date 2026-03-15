@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from supabase import create_client
 
-# --- 1. CORE FUNCTIONS (עצמאי לחלוטין למניעת שגיאות Import) ---
+# --- 1. CORE FUNCTIONS (עצמאי למניעת שגיאות Import) ---
 
 @st.cache_resource
 def init_connection():
@@ -23,7 +23,7 @@ def get_cloud_history():
         df['amount'] = df['amount'].astype(float)
         df['received_amount'] = df['received_amount'].astype(float)
         df['balance'] = df['amount'] - df['received_amount']
-        df['due_date_obj'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
+        df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
     return df
 
 def add_log_entry(record_id, note_text):
@@ -35,10 +35,9 @@ def add_log_entry(record_id, note_text):
         new_entry = f"[{timestamp}] {note_text}"
         updated_notes = f"{current_notes}\n{new_entry}" if current_notes else new_entry
         supabase.table("billing_history").update({"notes": updated_notes}).eq("id", record_id).execute()
-    except Exception as e:
-        st.error(f"Error updating notes: {e}")
+    except: pass
 
-# --- 2. LOGIC: SMART ICOUNT SCANNER ---
+# --- 2. SMART ICOUNT SCANNER ---
 def scan_receipt(file):
     text = ""
     try:
@@ -46,16 +45,13 @@ def scan_receipt(file):
             for page in pdf.pages:
                 text += page.extract_text() + "\n"
         
-        # חיפוש סכום בשקלים בלבד (₪) - פותר בעיית מטבע חוץ ב-iCount
-        # מחפש סימן שקל ואחריו מספרים עם פסיק/נקודה
+        # חיפוש סכום בשקלים (₪) - לוקח את האחרון שמופיע (הסכום הסופי בשורה התחתונה)
         amounts = re.findall(r"₪\s?([\d,]+\.\d{2})", text)
-        
         if amounts:
-            # לוקח את הסכום האחרון שמופיע (בדרך כלל ה-Grand Total בתחתית)
             amount = float(amounts[-1].replace(',', ''))
         else:
-            # גיבוי: חיפוש לפי מילות מפתח של iCount אם לא נמצא סימן ₪
-            match = re.search(r"(?:סה\"כ שולם|סה\"כ כולל מע\"מ|שולם|Total|Amount)[:\s]*₪?([\d,]+\.?\d*)", text)
+            # גיבוי במידה ואין סימן ₪
+            match = re.search(r"(?:סה\"כ שולם|סה\"כ כולל מע\"מ|Total|Amount)[:\s]*₪?([\d,]+\.\d{2})", text)
             amount = float(match.group(1).replace(',', '')) if match else 0.0
             
         return text, amount
@@ -63,7 +59,7 @@ def scan_receipt(file):
         return "", 0.0
 
 # --- 3. UI & STYLE ---
-st.set_page_config(page_title="Tuesday | Receipt Sync", page_icon="🧾", layout="wide")
+st.set_page_config(page_title="Tuesday | Smart Receipt Sync", page_icon="🧾", layout="wide")
 
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
@@ -78,62 +74,83 @@ st.markdown("""
         padding: 15px; border-radius: 10px; margin-bottom: 10px; border-right: 5px solid;
     }
     .match-success { background-color: #f0fdf4; border-color: #22c55e; color: #166534; }
+    .match-partial { background-color: #eff6ff; border-color: #3b82f6; color: #1e40af; }
     .match-error { background-color: #fef2f2; border-color: #ef4444; color: #991b1b; }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Bulk Receipt Sync 🧾")
-st.write("גררו לכאן את קבצי ה-PDF של iCount (קבלות/חשבוניות) לעדכון אוטומטי של המערכת.")
+st.title("Flexible Receipt Sync 🧾")
+st.write("מערכת סריקה חכמה: הכסף מהקבלה יחולק אוטומטית בין החובות הפתוחים של הלקוח.")
 
 # --- 4. MAIN INTERFACE ---
-uploaded_files = st.file_uploader("Drop iCount PDFs here", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader("Upload iCount Receipts (PDF)", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     df_cloud = get_cloud_history()
     
     if not df_cloud.empty:
         for uploaded_file in uploaded_files:
-            with st.spinner(f"Analyzing {uploaded_file.name}..."):
-                raw_text, amt = scan_receipt(uploaded_file)
+            with st.spinner(f"סורק את {uploaded_file.name}..."):
+                raw_text, receipt_total = scan_receipt(uploaded_file)
                 
-                # זיהוי חברה מתוך הטקסט
+                # זיהוי חברה
                 found_company = None
                 for comp in df_cloud['company'].unique():
                     if comp.lower() in raw_text.lower():
                         found_company = comp
                         break
                 
-                if found_company and amt > 0:
-                    # חיפוש התאמה ב-Supabase (חברה + סכום זהה + לא שולם)
-                    # הוספנו מרווח ביטחון קטן לסכום (Round) למקרה של עיגול אגורות
-                    match = df_cloud[
+                if found_company and receipt_total > 0:
+                    # מציאת כל החובות הפתוחים של החברה (מסודר מהישן לחדש)
+                    open_invoices = df_cloud[
                         (df_cloud['company'] == found_company) & 
-                        (df_cloud['status'] != 'Paid') & 
-                        (df_cloud['amount'].round(2) == round(amt, 2))
-                    ]
+                        (df_cloud['status'] != 'Paid')
+                    ].sort_values(by='date_dt', ascending=True)
                     
-                    if not match.empty:
-                        target = match.iloc[0]
-                        sid = target['id']
+                    if not open_invoices.empty:
+                        remaining_money = receipt_total
+                        updated_count = 0
                         
-                        # עדכון ב-Supabase לסגירת החוב
-                        supabase.table("billing_history").update({
-                            "received_amount": amt,
-                            "status": "Paid",
-                            "balance": 0
-                        }).eq("id", sid).execute()
+                        for _, inv in open_invoices.iterrows():
+                            if remaining_money <= 0: break
+                            
+                            inv_id = inv['id']
+                            current_balance = inv['balance']
+                            
+                            if remaining_money >= current_balance:
+                                # הקבלה מכסה את כל החוב הספציפי הזה
+                                payment_to_apply = current_balance
+                                new_received = inv['amount'] # סגירה מלאה
+                                new_status = "Paid"
+                                remaining_money -= current_balance
+                            else:
+                                # הקבלה מכסה רק חלק מהחוב הזה
+                                payment_to_apply = remaining_money
+                                new_received = inv['received_amount'] + remaining_money
+                                new_status = "Partial"
+                                remaining_money = 0
+                            
+                            # עדכון ב-Supabase
+                            supabase.table("billing_history").update({
+                                "received_amount": new_received,
+                                "status": new_status
+                            }).eq("id", inv_id).execute()
+                            
+                            add_log_entry(inv_id, f"Auto-Sync: Applied ₪{payment_to_apply:,.2f} from {uploaded_file.name}")
+                            updated_count += 1
                         
-                        add_log_entry(sid, f"🤖 Auto-Sync: Receipt matched from {uploaded_file.name} (₪{amt:,.2f})")
-                        
-                        st.markdown(f"""<div class="sync-card match-success">
-                            <b>✅ {found_company}</b>: זוהתה התאמה! החוב על סך ₪{amt:,.2f} עודכן כבוצע.
+                        # הודעת הצלחה מפורטת
+                        msg_type = "match-success" if remaining_money == 0 else "match-partial"
+                        st.markdown(f"""<div class="sync-card {msg_type}">
+                            <b>✅ {found_company}</b>: שוייך סכום של ₪{receipt_total:,.2f} עבור {updated_count} חשבוניות פתוחות.
                         </div>""", unsafe_allow_html=True)
+                        
                     else:
                         st.markdown(f"""<div class="sync-card match-error">
-                            <b>⚠️ {found_company}</b>: נמצאה קבלה על סך ₪{amt:,.2f}, אך לא נמצאה חשבונית פתוחה תואמת במערכת.
+                            <b>⚠️ {found_company}</b>: נמצאה קבלה על סך ₪{receipt_total:,.2f}, אך לא קיימים חובות פתוחים במערכת.
                         </div>""", unsafe_allow_html=True)
                 else:
-                    st.error(f"לא הצלחתי לזהות חברה או סכום תקין בקובץ: {uploaded_file.name}")
+                    st.error(f"לא הצלחתי לזהות חברה או סכום בקובץ: {uploaded_file.name}")
 
-        if st.button("View Updated Control Center"):
+        if st.button("Refresh Control Center"):
             st.switch_page("pages/4_Collections_Control.py")
