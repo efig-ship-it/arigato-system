@@ -49,71 +49,65 @@ st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=T
 
 st.title("Invoicing Dispatch 📧")
 
-# --- 3. LOADING & LOGIC ---
-st.subheader("1. Load Data")
-c_up, c_due = st.columns([2, 1])
-with c_up: 
-    up_ex = st.file_uploader("Upload Mailing List (Excel)", type=['xlsx'])
-with c_due:
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    sel_m = st.selectbox("Month", months, index=datetime.now().month - 1)
-    sel_y = st.selectbox("Year", ["2025", "2026", "2027"], index=1)
+# --- 3. LOADING DATA ---
+st.subheader("1. Load Files")
+c1, c2 = st.columns(2)
+with c1:
+    up_emails = st.file_uploader("Upload Mailing List (Emails)", type=['xlsx'], key="emails")
+with c2:
+    up_data = st.file_uploader("Upload Billing Data (Amounts)", type=['xlsx'], key="data")
 
-uploaded_files = st.file_uploader("Drop Invoices Here (PDF)", accept_multiple_files=True)
+uploaded_files = st.file_uploader("Drop PDF Invoices", accept_multiple_files=True)
 
-risk_cleared = True
-detective_cleared = True
-df_to_dispatch = pd.DataFrame()
+months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+sel_m = st.selectbox("For Month", months, index=datetime.now().month - 1)
+sel_y = st.selectbox("Year", ["2025", "2026"], index=1)
 
-if up_ex:
-    df_history = get_cloud_history()
-    df_raw = pd.read_excel(up_ex).dropna(how='all')
+df_final = pd.DataFrame()
+
+if up_emails and up_data:
+    # קריאת הקבצים
+    df_emails = pd.read_excel(up_emails).dropna(how='all')
+    df_amounts = pd.read_excel(up_data).dropna(how='all')
     
-    # נירמול שמות עמודות (מוריד רווחים והופך לקטן)
-    df_raw.columns = [str(c).lower().strip() for c in df_raw.columns]
+    # נירמול עמודות
+    df_emails.columns = [str(c).lower().strip() for c in df_emails.columns]
+    df_amounts.columns = [str(c).lower().strip() for c in df_amounts.columns]
     
-    # זיהוי עמודת מייל באופן גמיש
-    email_col = next((c for c in df_raw.columns if 'email' in c or 'mail' in c), None)
+    # חיפוש עמודת המייל באקסל האימיילים
+    email_col = next((c for c in df_emails.columns if 'email' in c or 'mail' in c), None)
     
-    if 'company' not in df_raw.columns or 'amount' not in df_raw.columns or not email_col:
-        st.error("❌ חסרות עמודות באקסל! וודא שיש עמודות בשם: company, amount ו-email.")
+    if 'company' not in df_emails.columns or 'company' not in df_amounts.columns or 'amount' not in df_amounts.columns or not email_col:
+        st.error("❌ וודא שבשני האקסלים יש עמודת 'company' ובאקסל הנתונים יש עמודת 'amount'.")
     else:
-        # --- לוגיקת סכימה (SUM) לפי חברה ---
-        df_to_dispatch = df_raw.groupby('company').agg({
-            'amount': 'sum',
-            email_col: 'first'
-        }).reset_index()
+        # סכימת הסכומים לפי חברה
+        df_summed = df_amounts.groupby('company')['amount'].sum().reset_index()
         
-        st.write("### 📊 Preview: Summary to Dispatch")
-        st.dataframe(df_to_dispatch, use_container_width=True, hide_index=True)
+        # חיבור עם רשימת המיילים (Merge)
+        df_final = pd.merge(df_summed, df_emails[['company', email_col]], on='company', how='inner')
+        
+        st.write("### 📊 Preview: Summary to Send")
+        st.dataframe(df_final, use_container_width=True, hide_index=True)
 
-        # --- הבלש (Detective) ---
+        # --- הבלש וניהול סיכונים ---
         file_names = [f.name for f in uploaded_files] if uploaded_files else []
-        missing = [c for c in df_to_dispatch['company'] if not any(str(c).lower() in fn.lower() for fn in file_names)]
+        missing = [c for c in df_final['company'] if not any(str(c).lower() in fn.lower() for fn in file_names)]
         if missing:
-            st.markdown(f'<div class="detective-box">🕵️‍♂️ <b>Detective:</b> missing files for: {", ".join(missing)}</div>', unsafe_allow_html=True)
-            det_ack = st.checkbox("I acknowledge the missing files")
-            if not det_ack: detective_cleared = False
-
-        # --- ניהול סיכונים (Risk) ---
+            st.markdown(f'<div class="detective-box">🕵️‍♂️ Missing PDF for: {", ".join(missing)}</div>', unsafe_allow_html=True)
+            
+        df_hist = get_cloud_history()
         risk_threshold = date.today() - timedelta(days=30)
-        bad_debts = df_history[(df_history['company'].isin(df_to_dispatch['company'])) & (df_history['status'] != 'Paid') & (df_history['due_date_obj'] < risk_threshold)]
+        bad_debts = df_hist[(df_hist['company'].isin(df_final['company'])) & (df_hist['status'] != 'Paid') & (df_hist['due_date_obj'] < risk_threshold)]
         if not bad_debts.empty:
-            st.markdown(f'<div class="risk-box">🚨 <b>Risk:</b> Overdue debts detected for companies in this list.</div>', unsafe_allow_html=True)
-            risk_ack = st.checkbox(f"Confirm sending despite {len(bad_debts)} overdue records")
-            if not risk_ack: risk_cleared = False
+            st.markdown(f'<div class="risk-box">🚨 Overdue debts detected for {len(bad_debts.company.unique())} companies.</div>', unsafe_allow_html=True)
 
-# --- 4. AUTHENTICATION ---
-st.subheader("2. Authenticate")
-c_auth1, c_auth2 = st.columns(2)
-with c_auth1: u_m = st.text_input("Gmail Account")
-with c_auth2: u_p = st.text_input("App Password", type="password")
+# --- 4. AUTH & DISPATCH ---
+st.subheader("2. Dispatch")
+u_m = st.text_input("Gmail Account")
+u_p = st.text_input("App Password", type="password")
 
-st.divider()
-
-# --- 5. DISPATCH EXECUTION ---
-if up_ex and uploaded_files and u_m and u_p and not df_to_dispatch.empty:
-    if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (risk_cleared and detective_cleared)):
+if st.button("🚀 Start Dispatch", use_container_width=True) and not df_final.empty:
+    if u_m and u_p:
         try:
             server = smtplib.SMTP("smtp.gmail.com", 587)
             server.starttls()
@@ -123,45 +117,41 @@ if up_ex and uploaded_files and u_m and u_p and not df_to_dispatch.empty:
             with sh.container():
                 st.markdown('<div class="suitcase-container"><div class="big-suitcase">💼</div></div>', unsafe_allow_html=True)
                 
-                for _, row in df_to_dispatch.iterrows():
+                for _, row in df_final.iterrows():
                     comp = str(row['company']).strip()
                     target_email = str(row[email_col]).strip()
                     total_sum = float(row['amount'])
                     
-                    # הצלבת קבצים (שם חברה מופיע בשם הקובץ)
                     comp_files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
                     
                     if comp_files:
-                        with st.spinner(f"Sending to {comp}..."):
-                            msg = MIMEMultipart()
-                            msg['Subject'] = f"Invoice - {comp}"
-                            msg['To'] = target_email
-                            msg.attach(MIMEText(f"Hello,\nPlease find attached invoices. Total: ₪{total_sum:,.2f}", 'plain'))
-                            
-                            for f in comp_files:
-                                part = MIMEApplication(f.getvalue(), Name=f.name)
-                                part['Content-Disposition'] = f'attachment; filename="{f.name}"'
-                                msg.attach(part)
-                            
-                            server.send_message(msg)
-                            
-                            # שמירה ל-Supabase עם הסכום שנסכם מהאקסל
-                            due_str = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
-                            supabase.table("billing_history").insert({
-                                "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                                "company": comp,
-                                "amount": total_sum,
-                                "received_amount": 0.0,
-                                "status": "Sent",
-                                "due_date": due_str
-                            }).execute()
+                        msg = MIMEMultipart()
+                        msg['Subject'] = f"Invoice - {comp}"
+                        msg['To'] = target_email
+                        msg.attach(MIMEText(f"Hello,\nTotal amount for this period: ₪{total_sum:,.2f}.\nAttached invoices.", 'plain'))
+                        
+                        for f in comp_files:
+                            part = MIMEApplication(f.getvalue(), Name=f.name)
+                            part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+                            msg.attach(part)
+                        
+                        server.send_message(msg)
+                        
+                        # שמירה ל-Supabase
+                        due_str = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
+                        supabase.table("billing_history").insert({
+                            "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            "company": comp,
+                            "amount": total_sum,
+                            "received_amount": 0.0,
+                            "status": "Sent",
+                            "due_date": due_str
+                        }).execute()
             
             server.quit()
             sh.empty()
             st.balloons()
-            st.success("Dispatch Completed! Amounts updated in Control Center.")
-            time.sleep(1)
-            st.rerun()
-            
+            st.success("Dispatch Completed!")
+            time.sleep(1); st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
