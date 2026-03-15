@@ -1,128 +1,100 @@
 import streamlit as st
 import pandas as pd
+from supabase import create_client, Client
+from datetime import datetime
 import re
-from datetime import datetime, timedelta, date
-from supabase import create_client 
-st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
+import time
 
-# --- 1. CONFIGURATION ---
-st.set_page_config(page_title="TMC Billing PRO", layout="wide")
+# --- 1. CONFIG & CONNECTION ---
+st.set_page_config(page_title="Tuesday | Dashboard", page_icon="💼", layout="wide")
 
-# --- 2. DATABASE CONNECTION ---
-if "supabase" not in st.session_state:
+@st.cache_resource
+def init_connection():
     u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
     k = st.secrets["SUPABASE_KEY"].strip().replace('"', '')
-    st.session_state.supabase = create_client(u, k)
+    return create_client(u, k)
 
-supabase = st.session_state.supabase
+supabase = init_connection()
 
-# --- 3. GLOBAL CSS & ANIMATIONS ---
-st.markdown("""<style>
-    .main { background-color: #f4f7f9; }
-    div[data-testid="stMetricValue"] { font-size: 22px !important; font-weight: 700 !important; color: #003366; }
-    div[data-testid="stMetric"] { background-color: #ffffff; border-radius: 10px; border: 1px solid #e1e8ed; padding: 15px !important; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    .tuesday-header { font-size: 28px; font-weight: 900; color: #003366; margin-bottom: 10px; padding-left: 5px; }
-    .risk-box { border: 2px solid #e53e3e; background-color: #fff5f5; padding: 15px; border-radius: 10px; margin-bottom: 15px; color: #c53030; }
-    .detective-box { border: 2px solid #ed8936; background-color: #fffaf0; padding: 15px; border-radius: 10px; margin-bottom: 15px; color: #9c4221; }
-    .alert-box { border-right: 6px solid #003366; margin-bottom: 20px; padding: 15px; background: white; border-radius: 10px; border: 1px solid #e1e8ed; }
-    .log-box { background-color: #ffffff; padding: 10px; border-radius: 6px; border: 1px solid #e0e4e8; border-right: 4px solid #003366; margin-bottom: 5px; font-size: 13px; direction: ltr; }
-    
-    /* Live Animations */
-    @keyframes wobble { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
-    @keyframes ring { 0% { transform: scale(1); } 50% { transform: scale(1.2) rotate(15deg); } 100% { transform: scale(1); } }
-    @keyframes flash { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(1.25); filter: drop-shadow(0 0 15px red); } }
-    
-    .suitcase-anim { font-size: 100px; text-align: center; display: block; animation: wobble 0.8s infinite ease-in-out; }
-    .bell-anim { font-size: 100px; text-align: center; display: block; animation: ring 0.4s infinite ease-in-out; }
-    .siren-anim { font-size: 100px; text-align: center; display: block; animation: flash 0.5s infinite; }
-</style>""", unsafe_allow_html=True)
-
-# --- 4. SHARED FUNCTIONS (The Engine) ---
-
+# --- 2. DATA FETCHING ---
 def get_cloud_history():
-    """מושך את כל היסטוריית הגבייה מהענן ומבצע עיבוד נתונים ראשוני"""
-    try:
-        response = supabase.table("billing_history").select("*").order("id", desc=True).execute()
-        df = pd.DataFrame(response.data)
-        if not df.empty:
-            df['date_sent_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
-            df = df.dropna(subset=['date_sent_dt'])
-            df['date_sent_obj'] = df['date_sent_dt'].dt.date
-            df['date_sent_str'] = df['date_sent_obj'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else "")
-            df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
-            df['received_amount'] = pd.to_numeric(df.get('received_amount', 0), errors='coerce').fillna(0.0)
-            df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce')
-            df['due_date_obj'] = df['due_date_dt'].dt.date
-            df['due_date_str'] = df['due_date_obj'].apply(lambda x: x.strftime('%Y-%m-%d') if not pd.isna(x) else "")
-            df['month_sent'] = df['date_sent_dt'].dt.strftime('%b %Y')
+    res = supabase.table("billing_history").select("*").order("date", desc=True).execute()
+    df = pd.DataFrame(res.data)
+    if not df.empty:
+        # המרת תאריכים והוספת עמודת יתרה
+        df['due_date_obj'] = pd.to_datetime(df['due_date']).dt.date
+        # וודא שהעמודות הן מסוג מספר
+        df['amount'] = df['amount'].astype(float)
+        df['received_amount'] = df['received_amount'].astype(float)
+        df['balance'] = df['amount'] - df['received_amount']
+    return df
+
+# --- 3. UI BRANDING ---
+st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
+
+st.markdown("""
+    <style>
+    .tuesday-header {
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        color: #1E3A8A; font-size: 32px; font-weight: bold;
+        letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
+    }
+    .metric-box {
+        background-color: #f1f5f9;
+        padding: 20px;
+        border-radius: 12px;
+        border-right: 5px solid #1E3A8A;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.05);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# --- 4. MAIN DASHBOARD ---
+l_pad, home_col, r_pad = st.columns([0.1, 0.8, 0.1])
+
+with home_col:
+    st.title("Tuesday Business Overview 🏠")
+    
+    df_history = get_cloud_history()
+    
+    if not df_history.empty:
+        # חישוב המספרים שביקשת
+        total_invoiced = df_history['amount'].sum()
+        total_received = df_history['received_amount'].sum()
+        total_pending = df_history['balance'].sum()
+        
+        # תצוגת המדדים בראש הדף
+        st.write("### Financial Performance")
+        m1, m2, m3 = st.columns(3)
+        
+        with m1:
+            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+            st.metric("Total Invoiced", f"₪{total_invoiced:,.0f}")
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            today = date.today()
-            def auto_status(row):
-                if row['status'] == 'Paid': return 'Paid'
-                if pd.notna(row['due_date_obj']) and row['due_date_obj'] < today: return 'Overdue'
-                return row['status']
+        with m2:
+            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+            # כמה קיבלנו - המדד שביקשת להוסיף
+            st.metric("Total Received", f"₪{total_received:,.0f}", 
+                      delta=f"{ (total_received/total_invoiced)*100:.1f}% Collected", delta_color="normal")
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            df['status'] = df.apply(auto_status, axis=1)
-            df['balance'] = df['amount'] - df['received_amount']
+        with m3:
+            st.markdown('<div class="metric-box">', unsafe_allow_html=True)
+            st.metric("Pending Balance", f"₪{total_pending:,.0f}", delta_color="inverse")
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            def extract_days(note, sent_date):
-                match = re.search(r'Paid on (\d{2}/\d{2}/\d{2})', str(note))
-                if match and not pd.isna(sent_date):
-                    try:
-                        p_dt = pd.to_datetime(match.group(1), format='%d/%m/%y')
-                        return (p_dt - sent_date).days
-                    except: return None
-                return None
-            df['days_to_pay'] = df.apply(lambda r: extract_days(r['notes'], r['date_sent_dt']), axis=1)
-        return df
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
+        st.divider()
+        
+        # טבלה של הפעולות האחרונות
+        st.write("### Recent Invoices")
+        st.dataframe(
+            df_history[['date', 'company', 'amount', 'received_amount', 'balance', 'status']].head(15),
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No data available yet. Start by sending your first invoice!")
 
-def add_log_entry(item_id, entry_text):
-    """מוסיף הערה עם חותמת זמן להיסטוריית התיעוד של חוב ספציפי"""
-    current_time = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%y %H:%M")
-    new_entry = f"[{current_time}] {entry_text}"
-    res = supabase.table("billing_history").select("notes").eq("id", item_id).execute()
-    old_notes = res.data[0]['notes'] if res.data and res.data[0]['notes'] else ""
-    updated = f"{old_notes}\n{new_entry}".strip() if old_notes else new_entry
-    supabase.table("billing_history").update({"notes": updated}).eq("id", item_id).execute()
-
-def clean_amount(val):
-    """מנקה תווים לא רלוונטיים מסכומי כסף (למשל סימן דולר או פסיקים)"""
-    try:
-        if pd.isna(val): return 0.0
-        return float(re.sub(r'[^\d.]', '', str(val)))
-    except:
-        return 0.0
-
-def extract_total_amount_from_file(uploaded_file):
-    """סורק קובץ אקסל מצורף ומחבר את כל הערכים בעמודת amount"""
-    try:
-        temp_df = pd.read_excel(uploaded_file)
-        temp_df.columns = [str(c).lower().strip() for c in temp_df.columns]
-        if 'amount' in temp_df.columns:
-            return float(pd.to_numeric(temp_df['amount'].apply(clean_amount), errors='coerce').fillna(0.0).sum())
-    except:
-        pass
-    return 0.0
-
-def play_siren():
-    """מפעיל צליל התראה (משמש ב-Reminders Manager)"""
-    st.markdown("""<audio autoplay><source src="https://www.soundjay.com/buttons/beep-01a.mp3" type="audio/mpeg"></audio>""", unsafe_allow_html=True)
-
-# --- 5. MAIN INTERFACE ---
-st.sidebar.markdown('<p class="tuesday-header">Tuesday PRO</p>', unsafe_allow_html=True)
-st.title("TMC Billing PRO - Command Center")
-st.write("### Welcome, Admin")
-st.info("Select a module from the sidebar to begin managing invoices, analytics, or collections.")
-
-# הצגת תקציר מהיר בעמוד הבית
-df_quick = get_cloud_history()
-if not df_quick.empty:
-    st.divider()
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Outstanding", f"${df_quick['balance'].sum():,.0f}")
-    col2.metric("Overdue Count", len(df_quick[df_quick['status'] == 'Overdue']))
-    col3.metric("Latest Sync", datetime.now().strftime("%H:%M:%S"))
-
+    if st.button("Refresh All Data"):
+        st.rerun()
