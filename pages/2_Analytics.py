@@ -1,53 +1,145 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta
-from app import get_cloud_history
+import plotly.graph_objects as go
+from datetime import datetime, timedelta
+from app import get_cloud_history, supabase
 
-st.title("Analytics Dashboard 📊")
-df_raw = get_cloud_history()
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Tuesday | Business Intelligence", page_icon="📈", layout="wide")
 
-if not df_raw.empty:
-    today = date.today()
-    risk_v = df_raw[df_raw['status'] == 'Overdue']['balance'].sum()
-    forecast_v = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
-    c1, c2 = st.columns(2)
-    c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e; background-color:#fff5f5;"><p style="color:#c53030; font-weight:700;">🚨 Total Overdue</p><h2>${risk_v:,.0f}</h2></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169; background-color:#f0fff4;"><p style="color:#2f855a; font-weight:700;">🟢 Next 7d Forecast</p><h2>${forecast_v:,.0f}</h2></div>', unsafe_allow_html=True)
+# --- SIDEBAR BRANDING ---
+st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
+
+st.title("Business Intelligence & Analytics 📊")
+
+# --- CSS FOR PREMIUM LOOK ---
+st.markdown("""
+    <style>
+    .tuesday-header {
+        font-family: 'Helvetica Neue', Arial, sans-serif;
+        color: #1E3A8A; font-size: 32px; font-weight: bold;
+        letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
+    }
+    .metric-container {
+        background-color: #ffffff; padding: 20px; border-radius: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e2e8f0;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+# 1. LOAD DATA
+df = get_cloud_history()
+
+if not df.empty:
+    # --- DATA PREP ---
+    df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True).dt.date
+    df['month_year'] = pd.to_datetime(df['date'], dayfirst=True).dt.strftime('%b %Y')
     
-    st.divider(); f1, f2, f3 = st.columns(3)
-    sel_c = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
-    m_s_min = df_raw['date_sent_obj'].min() if 'date_sent_obj' in df_raw.columns else today
-    s_rng = f2.date_input("Sent Range", value=(m_s_min, df_raw['date_sent_obj'].max() if 'date_sent_obj' in df_raw.columns else today))
-    d_rng = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
-    df = df_raw.copy()
-    if sel_c: df = df[df['company'].isin(sel_c)]
-    if isinstance(s_rng, tuple) and len(s_rng) == 2: df = df[(df['date_sent_obj'] >= s_rng[0]) & (df['date_sent_obj'] <= s_rng[1])]
-    if isinstance(d_rng, tuple) and len(d_rng) == 2: df = df[(df['due_date_obj'] >= d_rng[0]) & (df['due_date_obj'] <= d_rng[1])]
-    
+    # --- FILTERS SECTION ---
+    with st.expander("🔍 Advanced Reporting Filters", expanded=True):
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            all_comps = sorted(df['company'].unique())
+            sel_comps = st.multiselect("Filter Companies", all_comps)
+        with f2:
+            all_status = df['status'].unique()
+            sel_status = st.multiselect("Filter Status", all_status)
+        with f3:
+            min_date = df['date_dt'].min()
+            max_date = df['date_dt'].max()
+            date_rng = st.date_input("Time Period", value=(min_date, max_date))
+
+    # Apply Filters
+    filtered_df = df.copy()
+    if sel_comps:
+        filtered_df = filtered_df[filtered_df['company'].isin(sel_comps)]
+    if sel_status:
+        filtered_df = filtered_df[filtered_df['status'].isin(sel_status)]
+    if isinstance(date_rng, tuple) and len(date_rng) == 2:
+        filtered_df = filtered_df[(filtered_df['date_dt'] >= date_rng[0]) & (filtered_df['date_dt'] <= date_rng[1])]
+
+    st.divider()
+
+    # --- TOP METRICS ---
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("CEI Index", f"{(df[df['due_date_obj'] <= today]['received_amount'].sum()/df[df['due_date_obj'] <= today]['amount'].sum()*100):.1f}%" if df[df['due_date_obj'] <= today]['amount'].sum()>0 else "0%")
-    m2.metric("Outstanding", f"${df['balance'].sum():,.0f}"); m3.metric("Billed Total", f"${df['amount'].sum():,.0f}"); m4.metric("Reminded Debt", f"${df[df['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
-    
-    st.divider(); g1, g2 = st.columns(2)
+    total_inv = filtered_df['amount'].sum()
+    total_rec = filtered_df['received_amount'].sum()
+    total_pen = total_inv - total_rec
+    rate = (total_rec / total_inv * 100) if total_inv > 0 else 0
+
+    m1.metric("Gross Invoiced", f"${total_inv:,.0f}")
+    m2.metric("Total Collected", f"${total_rec:,.0f}")
+    m3.metric("Pending (Debt)", f"${total_pen:,.0f}", delta=f"{100-rate:.1f}% Unpaid", delta_color="inverse")
+    m4.metric("Collection Efficiency", f"{rate:.1f}%")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # --- MAIN GRAPHS: ROW 1 ---
+    g1, g2 = st.columns([1, 1])
+
     with g1:
-        st.subheader("Status Distribution")
-        st.plotly_chart(px.pie(df.groupby('status')['amount'].sum().reset_index(), values='amount', names='status', color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
+        st.subheader("Monthly Revenue Stream ($)")
+        # קיבוץ לפי חודש לגרף עמודות
+        monthly = filtered_df.groupby('month_year')[['amount', 'received_amount']].sum().reset_index()
+        fig_revenue = px.bar(monthly, x='month_year', y=['amount', 'received_amount'],
+                             barmode='group', labels={'value': 'Amount ($)', 'month_year': 'Month'},
+                             color_discrete_map={'amount': '#3b82f6', 'received_amount': '#10b981'})
+        fig_revenue.update_layout(legend_title_text='Type')
+        st.plotly_chart(fig_revenue, use_container_width=True)
+
     with g2:
-        st.subheader("Top 5 Debtors")
-        debtors = df.groupby('company')['balance'].sum().sort_values(ascending=False).head(5).reset_index()
-        if not debtors[debtors['balance']>0].empty:
-            st.plotly_chart(px.bar(debtors[debtors['balance']>0], x='balance', y='company', orientation='h', color='balance', color_continuous_scale='Reds'), use_container_width=True)
-    
-    st.divider(); st.subheader("Data Analysis (Pivots)")
-    st.write("**Company Pivot**"); st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.0f}"), use_container_width=True)
-    pc1, pc2 = st.columns(2)
-    with pc1: st.write("**Monthly Performance**"); st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.0f}"), use_container_width=True)
-    with pc2: 
-        st.write("**Avg Payment Speed**"); spd = df[df['days_to_pay'].notna()]
-        if not spd.empty: st.dataframe(spd.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True)
-    
-    st.divider(); st.subheader("Efficiency: Billed vs Received (Cumulative Trend)")
-    trend = df.groupby('due_date_obj')[['amount', 'received_amount']].sum().cumsum().reset_index()
-    fig_t = px.line(trend, x='due_date_obj', y=['amount', 'received_amount'], markers=True, color_discrete_map={'amount': '#003366', 'received_amount': '#64ffda'})
-    st.plotly_chart(fig_t, use_container_width=True)
+        st.subheader("Collection Breakdown (Status)")
+        # גרף עוגה של סכומי הסטטוסים
+        status_sum = filtered_df.groupby('status')['amount'].sum().reset_index()
+        fig_status = px.pie(status_sum, names='status', values='amount',
+                            hole=0.5, color='status',
+                            color_discrete_map={'Paid': '#10b981', 'Overdue': '#ef4444', 'Sent': '#3b82f6', 'Partial': '#f59e0b'})
+        st.plotly_chart(fig_status, use_container_width=True)
+
+    st.divider()
+
+    # --- MAIN GRAPHS: ROW 2 ---
+    g3, g4 = st.columns([1, 1])
+
+    with g3:
+        st.subheader("Aging Report (Top 10 Debts)")
+        # הצגת הלקוחות עם החוב הגבוה ביותר
+        debts = filtered_df[filtered_df['balance'] > 0].groupby('company')['balance'].sum().nlargest(10).reset_index()
+        fig_debts = px.bar(debts, x='balance', y='company', orientation='h',
+                           text_auto='.2s', color='balance', color_continuous_scale='Reds')
+        fig_debts.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_debts, use_container_width=True)
+
+    with g4:
+        st.subheader("Collection vs. Goal")
+        # גרף Gauge שמראה אחוז גבייה
+        fig_gauge = go.Figure(go.Indicator(
+            mode = "gauge+number",
+            value = rate,
+            domain = {'x': [0, 1], 'y': [0, 1]},
+            title = {'text': "Collection Rate %"},
+            gauge = {
+                'axis': {'range': [None, 100]},
+                'bar': {'color': "#1E3A8A"},
+                'steps': [
+                    {'range': [0, 50], 'color': "#fee2e2"},
+                    {'range': [50, 80], 'color': "#fef3c7"},
+                    {'range': [80, 100], 'color': "#d1fae5"}
+                ],
+                'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': 95}
+            }
+        ))
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+    # --- DATA TABLE VIEW ---
+    st.subheader("Detailed Analytics Data")
+    st.dataframe(filtered_df[['company', 'date', 'amount', 'received_amount', 'balance', 'status']].sort_values(by='amount', ascending=False), 
+                 use_container_width=True, hide_index=True)
+
+else:
+    st.info("No data available to generate charts. Start by uploading invoices.")
+
+st.divider()
+if st.button("🔄 Reload Engine"):
+    st.rerun()
