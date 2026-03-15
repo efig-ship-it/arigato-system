@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
+import pdfplumber
+import re
 import time
 from datetime import datetime
 from supabase import create_client
 
-# --- 1. CORE FUNCTIONS (Directly inside to prevent ImportError) ---
+# --- 1. CORE FUNCTIONS (עצמאי לחלוטין למניעת שגיאות Import) ---
 
 @st.cache_resource
 def init_connection():
@@ -21,7 +23,6 @@ def get_cloud_history():
         df['amount'] = df['amount'].astype(float)
         df['received_amount'] = df['received_amount'].astype(float)
         df['balance'] = df['amount'] - df['received_amount']
-        # טיפול בטוח בתאריכים
         df['due_date_obj'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
     return df
 
@@ -37,10 +38,26 @@ def add_log_entry(record_id, note_text):
     except Exception as e:
         st.error(f"Error updating notes: {e}")
 
-# --- 2. SIDEBAR & STYLE ---
-st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
+# --- 2. LOGIC: EXTRACTING DATA FROM PDF ---
+def scan_receipt(file):
+    text = ""
+    try:
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text() + "\n"
+        
+        # חיפוש סכום (תומך בעברית ואנגלית)
+        amount_match = re.search(r"(?:סה\"כ|שולם|Total|Amount)[:\s]*₪?([\d,]+\.?\d*)", text)
+        amount = float(amount_match.group(1).replace(',', '')) if amount_match else 0.0
+        
+        return text, amount
+    except:
+        return "", 0.0
 
-st.title("Operations Control 🔍")
+# --- 3. UI & STYLE ---
+st.set_page_config(page_title="Tuesday | Receipt Sync", page_icon="🧾", layout="wide")
+
+st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
 st.markdown("""
     <style>
@@ -49,80 +66,65 @@ st.markdown("""
         color: #1E3A8A; font-size: 32px; font-weight: bold;
         letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
     }
-    .note-bubble {
-        background-color: #f8fafc; border-right: 4px solid #3b82f6;
-        padding: 12px; border-radius: 8px; margin-bottom: 8px;
-        font-size: 14px; color: #1e293b;
+    .sync-card {
+        padding: 15px; border-radius: 10px; margin-bottom: 10px; border-right: 5px solid;
     }
+    .match-success { background-color: #f0fdf4; border-color: #22c55e; color: #166534; }
+    .match-error { background-color: #fef2f2; border-color: #ef4444; color: #991b1b; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. MAIN LOGIC ---
-df_raw = get_cloud_history()
+st.title("Bulk Receipt Sync 🧾")
+st.write("Upload iCount receipts to automatically update the Control Center.")
 
-if not df_raw.empty:
-    # Filters
-    cf1, cf2 = st.columns(2)
-    c_sel = cf1.multiselect("Search Companies", sorted(df_raw['company'].unique()))
+# --- 4. MAIN INTERFACE ---
+uploaded_files = st.file_uploader("Drop iCount PDFs here", type="pdf", accept_multiple_files=True)
+
+if uploaded_files:
+    df_cloud = get_cloud_history()
     
-    f_df = df_raw.copy()
-    if c_sel: 
-        f_df = f_df[f_df['company'].isin(c_sel)]
-    
-    # Status Highlighting
-    def highlight_st(val):
-        if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
-        if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
-        if val == 'Partial': return 'background-color: #e3f2fd; color: #0d47a1; font-weight: bold;'
-        return ''
+    if not df_cloud.empty:
+        for uploaded_file in uploaded_files:
+            with st.spinner(f"Analyzing {uploaded_file.name}..."):
+                raw_text, amt = scan_receipt(uploaded_file)
+                
+                # זיהוי חברה
+                found_company = None
+                for comp in df_cloud['company'].unique():
+                    if comp.lower() in raw_text.lower():
+                        found_company = comp
+                        break
+                
+                if found_company and amt > 0:
+                    # חישוב התאמה (שם חברה + סכום זהה + לא שולם)
+                    match = df_cloud[
+                        (df_cloud['company'] == found_company) & 
+                        (df_cloud['status'] != 'Paid') & 
+                        (df_cloud['amount'] == amt)
+                    ]
+                    
+                    if not match.empty:
+                        target = match.iloc[0]
+                        sid = target['id']
+                        
+                        # עדכון ב-Supabase
+                        supabase.table("billing_history").update({
+                            "received_amount": amt,
+                            "status": "Paid",
+                            "balance": 0
+                        }).eq("id", sid).execute()
+                        
+                        add_log_entry(sid, f"🤖 Auto-Sync: Receipt matched from {uploaded_file.name} (${amt})")
+                        
+                        st.markdown(f"""<div class="sync-card match-success">
+                            <b>✅ {found_company}</b>: Receipt for ${amt:,.2f} matched and record updated to Paid.
+                        </div>""", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""<div class="sync-card match-error">
+                            <b>⚠️ {found_company}</b>: Found receipt for ${amt:,.2f}, but no matching open invoice found in Control Center.
+                        </div>""", unsafe_allow_html=True)
+                else:
+                    st.error(f"Could not identify company or amount in: {uploaded_file.name}")
 
-    st.dataframe(f_df[['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status']].style.applymap(highlight_st, subset=['status']), use_container_width=True, hide_index=True)
-    
-    st.divider()
-
-    # --- SINGLE UPDATE & NOTES ---
-    st.subheader("Audit & Documentation")
-    opts = f_df.apply(lambda r: f"[{r['due_date']}] - {r['company']} (${r['amount']:,.0f})", axis=1).tolist()
-    opt_to_id = dict(zip(opts, f_df['id'].tolist()))
-    
-    sel_l = st.selectbox("Select Record for Detail:", opts)
-    if sel_l:
-        sid = opt_to_id[sel_l]
-        row_data = df_raw[df_raw['id'] == sid].iloc[0]
-        
-        with st.expander("📄 View Interaction History", expanded=False):
-            if row_data['notes']:
-                for line in str(row_data['notes']).split('\n'):
-                    if line.strip():
-                        st.markdown(f'<div class="note-bubble">🕒 {line}</div>', unsafe_allow_html=True)
-            else:
-                st.info("No notes yet.")
-        
-        ci1, ci2, ci3 = st.columns([2, 1, 1])
-        with ci1: ent = st.text_input("New Note:")
-        with ci2: rec = st.number_input("Received:", value=float(row_data['received_amount']), key=f"r_{sid}")
-        with ci3: nst = st.selectbox("Status:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], index=0)
-        
-        if st.button("Save Update", use_container_width=True):
-            if ent: add_log_entry(sid, ent)
-            supabase.table("billing_history").update({"status": nst, "received_amount": float(rec)}).eq("id", sid).execute()
-            st.success("Updated!")
-            time.sleep(0.5); st.rerun()
-
-    st.divider()
-
-    # --- BATCH EXECUTE ---
-    with st.expander("⚡ Batch Execute (Multi-V)", expanded=False):
-        bulk = f_df[['id', 'company', 'due_date', 'amount', 'received_amount']].copy()
-        bulk['Select'] = False
-        sel_bulk = st.data_editor(bulk, column_config={"Select": st.column_config.CheckboxColumn("V", default=False), "id": None}, hide_index=True, use_container_width=True)
-
-        if st.button("🚀 Execute Batch", use_container_width=True):
-            to_up = sel_bulk[sel_bulk['Select'] == True]
-            for _, row in to_up.iterrows():
-                amt, rcv = float(row['amount']), float(row['received_amount'])
-                fin_rcv = amt if rcv == 0 else rcv
-                fin_stat = "Paid" if (amt - fin_rcv) <= 0 else "Partial"
-                supabase.table("billing_history").update({"status": fin_stat, "received_amount": fin_rcv}).eq("id", int(row['id'])).execute()
-                add_log_entry(row['id'], f"Batch Update: ${fin_rcv} received. Status: {fin_stat}")
-            st.success("Batch Done!"); time.sleep(1); st.rerun()
+        if st.button("View Updated Control Center"):
+            st.switch_page("pages/4_Collections_Control.py")
