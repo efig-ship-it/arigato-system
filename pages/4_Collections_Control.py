@@ -17,11 +17,9 @@ def get_cloud_history():
     res = supabase.table("billing_history").select("*").order("date", desc=True).execute()
     df = pd.DataFrame(res.data)
     if not df.empty:
-        # המרה בטוחה של מספרים
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0.0)
         df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0.0)
         df['balance'] = df['amount'] - df['received_amount']
-        # פורמט תאריך לתצוגה
         df['due_date_display'] = pd.to_datetime(df['due_date'], errors='coerce').dt.strftime('%d/%m/%Y')
     return df
 
@@ -46,17 +44,16 @@ st.markdown("""
         color: #1E3A8A; font-size: 32px; font-weight: bold;
         letter-spacing: -1px; border-bottom: 2px solid #1E3A8A; margin-bottom: 20px;
     }
-    .stDataFrame { border: 1px solid #e2e8f0; border-radius: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("Operations Control 🔍")
 
-# --- 3. MAIN LOGIC ---
+# --- 3. MAIN TABLE (TOP) ---
 df_raw = get_cloud_history()
 
 if not df_raw.empty:
-    # פילטרים
+    # פילטרים מהירים
     f1, f2 = st.columns([2,1])
     with f1: c_sel = st.multiselect("חפש חברה:", sorted(df_raw['company'].unique()))
     with f2: s_sel = st.multiselect("סינון סטטוס:", sorted(df_raw['status'].unique()))
@@ -65,7 +62,6 @@ if not df_raw.empty:
     if c_sel: f_df = f_df[f_df['company'].isin(c_sel)]
     if s_sel: f_df = f_df[f_df['status'].isin(s_sel)]
 
-    # צבעים
     def highlight_st(val):
         if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
         if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
@@ -73,68 +69,73 @@ if not df_raw.empty:
         if val == 'Sent Reminder': return 'background-color: #fef3c7; color: #92400e; font-weight: bold;'
         return ''
 
-    # טבלה ראשית (לקריאה בלבד)
+    # הצגת הטבלה הראשית תמיד למעלה
     view_cols = ['id', 'company', 'date', 'due_date_display', 'amount', 'received_amount', 'status']
     st.dataframe(
         f_df[view_cols].style.applymap(highlight_st, subset=['status']).format({'amount': '₪{:,.2f}', 'received_amount': '₪{:,.2f}'}),
         use_container_width=True, hide_index=True
     )
 
-    st.divider()
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- 4. ה-BATCH EXECUTE (המולטי שחזר) ---
-    st.subheader("⚡ Batch Execute (תשלום מהיר ב-V)")
-    bulk_df = f_df[['id', 'company', 'due_date_display', 'amount', 'received_amount']].copy()
-    bulk_df['Select'] = False # עמודת ה-V
+    # --- 4. ACTIONS (BOTTOM WITH EXPANDERS) ---
     
-    # עריכת הטבלה כדי לאפשר סימון V
-    edited_df = st.data_editor(
-        bulk_df,
-        column_config={
-            "Select": st.column_config.CheckboxColumn("בחר", default=False),
-            "id": None, # הסתרת ה-ID מהתצוגה
-            "amount": st.column_config.NumberColumn("סכום", format="₪%.2f"),
-            "received_amount": st.column_config.NumberColumn("התקבל", format="₪%.2f")
-        },
-        hide_index=True,
-        use_container_width=True
-    )
-
-    if st.button("🚀 עדכן את כל המסומנים כ-'שולם'", use_container_width=True):
-        to_update = edited_df[edited_df['Select'] == True]
-        if not to_update.empty:
-            for _, row in to_update.iterrows():
-                # מעדכן שהסכום שהתקבל שווה לסכום החשבונית
-                supabase.table("billing_history").update({
-                    "status": "Paid",
-                    "received_amount": float(row['amount'])
-                }).eq("id", int(row['id'])).execute()
-                add_log_entry(row['id'], f"Batch Update: Paid in full (₪{row['amount']})")
-            st.success(f"עודכנו {len(to_update)} רשומות בהצלחה!")
-            time.sleep(1)
-            st.rerun()
-        else:
-            st.warning("לא נבחרו רשומות לביצוע.")
-
-    st.divider()
-
-    # --- 5. עדכון פרטני (הערות) ---
-    st.subheader("📝 הערות ותיעוד פרטני")
-    sel_name = st.selectbox("בחר חברה לעדכון הערה:", f_df['company'].unique())
-    if sel_name:
-        sub_df = f_df[f_df['company'] == sel_name]
-        sel_rec = st.selectbox("בחר חשבונית ספציפית:", sub_df.apply(lambda r: f"ID: {r['id']} | {r['date']} | ₪{r['amount']}", axis=1))
-        sid = int(sel_rec.split(":")[1].split("|")[0].strip())
+    # חלק א: עדכון מהיר ב-V (Batch)
+    with st.expander("⚡ Batch Execute (עדכון מהיר למספר רשומות)", expanded=False):
+        bulk_df = f_df[['id', 'company', 'due_date_display', 'amount', 'received_amount']].copy()
+        bulk_df['Select'] = False
         
-        row_data = df_raw[df_raw['id'] == sid].iloc[0]
-        with st.expander("היסטוריית הערות"):
-            st.write(row_data['notes'] if row_data['notes'] else "אין הערות.")
-        
-        new_note = st.text_input("הערה חדשה:")
-        if st.button("שמור הערה"):
-            if new_note:
-                add_log_entry(sid, new_note)
-                st.success("הערה נשמרה.")
+        edited_df = st.data_editor(
+            bulk_df,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("בחר", default=False),
+                "id": None,
+                "amount": st.column_config.NumberColumn("סכום", format="₪%.2f"),
+                "received_amount": st.column_config.NumberColumn("התקבל", format="₪%.2f")
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="batch_editor"
+        )
+
+        if st.button("🚀 סגור את כל המסומנים כ-'שולם'", use_container_width=True):
+            to_update = edited_df[edited_df['Select'] == True]
+            if not to_update.empty:
+                for _, row in to_update.iterrows():
+                    supabase.table("billing_history").update({
+                        "status": "Paid",
+                        "received_amount": float(row['amount'])
+                    }).eq("id", int(row['id'])).execute()
+                    add_log_entry(row['id'], f"Batch Update: Paid in full (₪{row['amount']})")
+                st.success(f"עודכנו {len(to_update)} רשומות!")
+                time.sleep(1); st.rerun()
+            else:
+                st.warning("לא נבחרו רשומות.")
+
+    # חלק ב: תיעוד והערות פרטניות
+    with st.expander("📝 Manual Update & Audit (עדכון ידני והערות)", expanded=False):
+        sel_name = st.selectbox("בחר חברה:", ["בחר..."] + sorted(f_df['company'].unique().tolist()))
+        if sel_name != "בחר...":
+            sub_df = f_df[f_df['company'] == sel_name]
+            sel_rec = st.selectbox("בחר חשבונית ספציפית:", sub_df.apply(lambda r: f"ID: {r['id']} | {r['date']} | ₪{r['amount']}", axis=1))
+            sid = int(sel_rec.split(":")[1].split("|")[0].strip())
+            
+            row_data = df_raw[df_raw['id'] == sid].iloc[0]
+            
+            # הצגת הערות קיימות
+            st.info(row_data['notes'] if row_data['notes'] else "אין הערות קודמות.")
+            
+            c1, c2, c3 = st.columns([2, 1, 1])
+            with c1: new_note = st.text_input("הערה חדשה:", key=f"note_{sid}")
+            with c2: rec_val = st.number_input("סכום שהתקבל:", value=float(row_data['received_amount']), key=f"rec_{sid}")
+            with c3: new_stat = st.selectbox("סטטוס:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], 
+                                           index=["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"].index(row_data['status']) if row_data['status'] in ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"] else 0,
+                                           key=f"stat_{sid}")
+            
+            if st.button("שמור שינויים", use_container_width=True):
+                supabase.table("billing_history").update({"status": new_stat, "received_amount": float(rec_val)}).eq("id", sid).execute()
+                if new_note: add_log_entry(sid, new_note)
+                st.success("עודכן!")
                 time.sleep(0.5); st.rerun()
 else:
-    st.info("אין נתונים.")
+    st.info("אין נתונים להצגה.")
