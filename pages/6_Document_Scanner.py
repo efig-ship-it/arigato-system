@@ -3,6 +3,7 @@ import pandas as pd
 import pdfplumber
 import re
 import time
+import hashlib
 from datetime import datetime
 from supabase import create_client
 
@@ -15,9 +16,14 @@ def init_connection():
 
 supabase = init_connection()
 
-def get_open_invoices():
-    res = supabase.table("billing_history").select("*").neq("status", "Paid").execute()
+def get_billing_data():
+    res = supabase.table("billing_history").select("*").execute()
     return pd.DataFrame(res.data)
+
+def generate_file_hash(file):
+    """יצירת טביעת אצבע ייחודית לקובץ"""
+    file_bytes = file.getvalue()
+    return hashlib.md5(file_bytes).hexdigest()
 
 def scan_receipt(file):
     text = ""
@@ -38,15 +44,24 @@ st.title("Smart Receipt Sync 🧾")
 uploaded_files = st.file_uploader("העלה קבלות לסריקה", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
-    df_open = get_open_invoices()
+    df_all = get_billing_data()
     
     for uploaded_file in uploaded_files:
         with st.container():
             st.markdown(f"### סריקת קובץ: {uploaded_file.name}")
+            
+            # יצירת האש לקובץ הנוכחי
+            current_hash = generate_file_hash(uploaded_file)
             raw_text, receipt_amt = scan_receipt(uploaded_file)
             
             if receipt_amt > 0:
+                # בדיקת כפילות לפי האש (Hash)
+                is_duplicate = False
+                if not df_all.empty and 'file_hash' in df_all.columns:
+                    is_duplicate = (df_all['file_hash'] == current_hash).any()
+
                 # זיהוי חברה
+                df_open = df_all[df_all['status'] != 'Paid']
                 found_company = None
                 if not df_open.empty:
                     for comp in df_open['company'].unique():
@@ -54,36 +69,38 @@ if uploaded_files:
                             found_company = comp
                             break
                 
-                # תצוגת הממצאים למשתמש
                 col1, col2 = st.columns(2)
                 col1.metric("סכום שזוהה", f"₪{receipt_amt:,.2f}")
                 col2.metric("חברה משוייכת", found_company if found_company else "לא זוהה")
 
-                if found_company:
-                    # מציאת השורה הרלוונטית
+                # מנגנון חסימת כפילות
+                allow_action = True
+                if is_duplicate:
+                    st.error(f"🚫 **עצור! קבלה זו כבר הוזנה במערכת בעבר.** (זיהוי לפי תוכן הקובץ)")
+                    confirm_dup = st.checkbox(f"אני מבין שזו כפילות ובכל זאת רוצה לעדכן ({uploaded_file.name})", value=False)
+                    if not confirm_dup:
+                        allow_action = False
+
+                if found_company and allow_action:
                     rel = df_open[df_open['company'] == found_company].sort_values(by='date').iloc[0]
                     
-                    st.warning(f"המערכת מוכנה לעדכן את {found_company} (חוב נוכחי: ₪{float(rel['amount']):,.2f})")
-                    
-                    # --- הכפתור שביקשת ---
-                    # רק בלחיצה עליו העדכון יבוצע בפועל
-                    if st.button(f"🚀 אשר ועדכן קונטרול - {found_company}", key=f"sync_{rel['id']}"):
+                    if st.button(f"🚀 אשר ועדכן קונטרול - {found_company}", key=f"sync_{uploaded_file.name}"):
                         new_rec = float(rel['received_amount'] or 0) + receipt_amt
                         new_stat = "Paid" if new_rec >= float(rel['amount']) else "Partial"
                         
+                        # עדכון ה-DB כולל ה-Hash הייחודי
                         supabase.table("billing_history").update({
                             "received_amount": new_rec,
                             "status": new_stat,
-                            "notes": f"עודכן מסריקה: {uploaded_file.name} ({datetime.now().strftime('%d/%m/%Y')})"
+                            "file_hash": current_hash, # שמירת טביעת האצבע
+                            "notes": f"{rel.get('notes', '')}\nסריקה: {uploaded_file.name}"
                         }).eq("id", rel['id']).execute()
                         
-                        st.success(f"עודכן בהצלחה! {found_company} בסטטוס {new_stat}")
+                        st.success(f"עודכן! הקבלה ננעלה במערכת למניעת כפילויות.")
                         time.sleep(1)
                         st.rerun()
-                else:
-                    st.error("לא נמצאה חברה תואמת בקונטרול. וודא ששם החברה מופיע בטקסט של הקבלה.")
             else:
-                st.error("לא הצלחתי לחלץ סכום מהקובץ הזה.")
+                st.error("לא נמצא סכום תקין.")
             st.divider()
 
 if st.button("חזרה לקונטרול (עמוד 4)"):
