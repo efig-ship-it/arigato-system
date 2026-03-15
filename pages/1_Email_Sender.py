@@ -38,112 +38,109 @@ st.markdown("""
 st.title("Invoicing Dispatch 📧")
 
 # --- 3. UPLOADS ---
-col_up1, col_up2 = st.columns(2)
-with col_up1: 
-    up_emails = st.file_uploader("1. Upload Mailing List (Emails)", type=['xlsx'])
-with col_up2: 
-    up_data = st.file_uploader("2. Upload Billing Data (Amounts)", type=['xlsx'])
+col_up, col_due = st.columns([2, 1])
+with col_up:
+    up_mailing = st.file_uploader("1. Upload Mailing List (Company, Email, Day)", type=['xlsx'])
+with col_due:
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    sel_m = st.selectbox("Billing Month", months, index=datetime.now().month - 1)
+    sel_y = st.selectbox("Year", ["2025", "2026"], index=1)
 
-uploaded_files = st.file_uploader("Drop PDF Invoices Here", accept_multiple_files=True)
+# כאן אתה מעלה גם את ה-PDF וגם את ה-EXCEL של החברות (המערכת תדע להבדיל)
+uploaded_files = st.file_uploader("2. Drop Company Files (PDF Invoices & Company Excels)", accept_multiple_files=True)
 
-months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-sel_m = st.selectbox("Month", months, index=datetime.now().month - 1)
-sel_y = st.selectbox("Year", ["2025", "2026"], index=1)
-
-df_final = pd.DataFrame()
 risk_cleared, detective_cleared = True, True
+mailing_data = pd.DataFrame()
 
-if up_emails and up_data:
+if up_mailing:
     try:
-        df_e = pd.read_excel(up_emails).dropna(how='all')
-        df_d = pd.read_excel(up_data).dropna(how='all')
+        mailing_data = pd.read_excel(up_mailing).dropna(how='all')
+        mailing_data.columns = [str(c).lower().strip() for c in mailing_data.columns]
         
-        # נירמול עמודות
-        df_e.columns = [str(c).lower().strip() for c in df_e.columns]
-        df_d.columns = [str(c).lower().strip() for c in df_d.columns]
-        
-        # חיפוש עמודות (amount באקסל השני, email בראשון)
-        amt_col = next((c for c in df_d.columns if 'amount' in c or 'סכום' in c), None)
-        email_col = next((c for c in df_e.columns if 'email' in c or 'mail' in c), df_e.columns[1])
+        # זיהוי עמודות בסיסיות במיילינג ליסט
+        comp_col = mailing_data.columns[0]
+        email_col = next((c for c in mailing_data.columns if 'email' in c or 'mail' in c), mailing_data.columns[1])
+        day_col = next((c for c in mailing_data.columns if 'day' in c or 'due' in c or 'יום' in c), None)
 
-        if not amt_col:
-            st.error(f"❌ לא נמצאה עמודת סכום באקסל הנתונים. עמודות: {list(df_d.columns)}")
-        elif 'company' not in df_e.columns or 'company' not in df_d.columns:
-            st.error("❌ חסרה עמודת 'company' באחד הקבצים.")
-        else:
-            # סכימת סכומים מהאקסל השני
-            df_d[amt_col] = pd.to_numeric(df_d[amt_col], errors='coerce').fillna(0.0)
-            df_summed = df_d.groupby('company')[amt_col].sum().reset_index()
-            
-            # חיבור עם המיילים מהאקסל הראשון
-            df_final = pd.merge(df_summed, df_e[['company', email_col]], on='company', how='inner')
-            
-            st.write("### 📊 Preview: Summary to Dispatch")
-            st.dataframe(df_final, use_container_width=True, hide_index=True)
-            
-            # --- הבלש (Detective) ---
-            file_names = [f.name for f in uploaded_files] if uploaded_files else []
-            current_companies = df_final['company'].tolist()
-            missing = [c for c in current_companies if not any(str(c).lower() in fn.lower() for fn in file_names)]
-            
+        # בדיקות בלש וסיכונים
+        df_history = get_cloud_history()
+        current_companies = mailing_data[comp_col].astype(str).str.strip().tolist()
+        
+        # בלש (האם העלו קבצים לכל חברה)
+        if uploaded_files:
+            file_names = [f.name.lower() for f in uploaded_files]
+            missing = [c for c in current_companies if not any(c.lower() in fn for fn in file_names)]
             if missing:
                 st.markdown(f'<div class="detective-box">🕵️‍♂️ <b>Detective:</b> Missing files for: {", ".join(missing)}</div>', unsafe_allow_html=True)
-                det_ack = st.checkbox("I acknowledge the missing files and wish to proceed", value=False)
+                det_ack = st.checkbox("Proceed despite missing files")
                 if not det_ack: detective_cleared = False
+        
+        # סיכונים (חובות עבר)
+        risk_threshold = date.today() - timedelta(days=30)
+        bad = df_history[(df_history['company'].isin(current_companies)) & (df_history['status'] != 'Paid') & (df_history['due_date_obj'] < risk_threshold)]
+        if not bad.empty:
+            st.markdown(f'<div class="risk-box">🚨 <b>Risk:</b> Overdue debts for: {", ".join(bad["company"].unique())}</div>', unsafe_allow_html=True)
+            risk_ack = st.checkbox("Confirm dispatch for debtors")
+            if not risk_ack: risk_cleared = False
             
-            # --- ניהול סיכונים (Risk) ---
-            df_history = get_cloud_history()
-            risk_threshold = date.today() - timedelta(days=30)
-            bad = df_history[(df_history['company'].isin(current_companies)) & (df_history['status'] != 'Paid') & (df_history['due_date_obj'] < risk_threshold)]
-            
-            if not bad.empty:
-                st.markdown(f'<div class="risk-box">🚨 <b>Risk:</b> Overdue debts detected for: {", ".join(bad["company"].unique())}</div>', unsafe_allow_html=True)
-                risk_ack = st.checkbox("I confirm I have checked these overdue debts", value=False)
-                if not risk_ack: risk_cleared = False
-
     except Exception as e:
-        st.error(f"Error processing files: {e}")
+        st.error(f"Error loading mailing list: {e}")
 
 # --- 4. AUTH & DISPATCH ---
 sc1, sc2 = st.columns(2)
 u_m = sc1.text_input("Gmail Account")
 u_p = sc2.text_input("App Password", type="password")
 
-if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (not df_final.empty and uploaded_files and risk_cleared and detective_cleared)):
+if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_mailing and uploaded_files and risk_cleared and detective_cleared)):
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(u_m.strip(), u_p.strip().replace(" ",""))
         sh = st.empty()
+        
         with sh.container():
             st.markdown('<div class="suitcase-anim">💼</div>', unsafe_allow_html=True)
-            for _, row in df_final.iterrows():
-                comp = str(row['company']).strip()
-                target_email = str(row[email_col]).strip()
-                total_sum = float(row[amt_col])
+            
+            for _, row in mailing_data.iterrows():
+                comp = str(row[comp_col]).strip()
+                email = str(row[email_col]).strip()
+                due_day = int(row[day_col]) if day_col and pd.notna(row[day_col]) else 15
                 
-                comp_files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
+                # 1. מציאת קובץ האקסל של החברה וסכימת ה-amount
+                comp_excels = [f for f in uploaded_files if comp.lower() in f.name.lower() and f.name.endswith('.xlsx')]
+                total_sum = 0.0
+                if comp_excels:
+                    for ex in comp_excels:
+                        df_temp = pd.read_excel(ex)
+                        df_temp.columns = [str(c).lower().strip() for c in df_temp.columns]
+                        amt_col = next((c for c in df_temp.columns if 'amount' in c or 'סכום' in c), None)
+                        if amt_col:
+                            total_sum += pd.to_numeric(df_temp[amt_col], errors='coerce').sum()
+
+                # 2. מציאת קבצי ה-PDF לשליחה
+                pdf_files = [f for f in uploaded_files if comp.lower() in f.name.lower() and f.name.endswith('.pdf')]
                 
-                if comp_files:
+                if email and (pdf_files or comp_excels):
                     with st.spinner(f"Sending to {comp}..."):
                         msg = MIMEMultipart()
                         msg['Subject'] = f"Invoice - {comp}"
-                        msg['To'] = target_email
-                        msg.attach(MIMEText(f"Hello,\nPlease find attached invoices for {comp}.\nTotal Amount: ₪{total_sum:,.2f}", 'plain'))
+                        msg['To'] = email
+                        msg.attach(MIMEText(f"Hello {comp},\nAttached invoices. Total amount: ₪{total_sum:,.2f}", 'plain'))
                         
-                        for f in comp_files:
+                        # מצרפים את כל הקבצים שמצאנו (PDF וגם האקסל אם צריך)
+                        for f in (pdf_files + comp_excels):
                             part = MIMEApplication(f.getvalue(), Name=f.name)
                             part['Content-Disposition'] = f'attachment; filename="{f.name}"'
                             msg.attach(part)
                         
                         server.send_message(msg)
                         
-                        # עדכון Supabase
-                        dv = f"{sel_y}-{months.index(sel_m)+1:02d}-15"
-                        it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
+                        # 3. שמירה ל-Supabase
+                        dv_str = f"{sel_y}-{months.index(sel_m)+1:02d}-{due_day:02d}"
+                        it_str = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
                         supabase.table("billing_history").insert({
-                            "date": it, "company": comp, "amount": total_sum, 
-                            "status": "Sent", "due_date": dv, "sender": u_m, "received_amount": 0
+                            "date": it_str, "company": comp, "amount": total_sum, 
+                            "status": "Sent", "due_date": dv_str, "sender": u_m, "received_amount": 0
                         }).execute()
-                    
-        server.quit(); sh.empty(); st.balloons(); st.success("Dispatch Finished!"); time.sleep(1); st.rerun()
+
+        server.quit(); st.balloons(); st.success("Dispatch Finished!"); time.sleep(1); st.rerun()
     except Exception as e:
         st.error(f"Error: {e}")
