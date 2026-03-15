@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from supabase import create_client
 
-# --- 1. CORE FUNCTIONS (Directly inside to prevent ImportError) ---
+# --- 1. CORE FUNCTIONS (עצמאי לחלוטין למניעת שגיאות Import) ---
 
 @st.cache_resource
 def init_connection():
@@ -21,7 +21,6 @@ def get_cloud_history():
         df['amount'] = df['amount'].astype(float)
         df['received_amount'] = df['received_amount'].astype(float)
         df['balance'] = df['amount'] - df['received_amount']
-        # טיפול בטוח בתאריכים
         df['due_date_obj'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
     return df
 
@@ -69,14 +68,23 @@ if not df_raw.empty:
     if c_sel: 
         f_df = f_df[f_df['company'].isin(c_sel)]
     
-    # Status Highlighting
+    # --- צביעת סטטוסים מעודכנת ---
     def highlight_st(val):
-        if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
-        if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
-        if val == 'Partial': return 'background-color: #e3f2fd; color: #0d47a1; font-weight: bold;'
+        if val == 'Paid': 
+            return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
+        if val == 'Overdue': 
+            return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold;'
+        if val == 'Partial': 
+            return 'background-color: #e3f2fd; color: #0d47a1; font-weight: bold;'
+        if val == 'Sent Reminder': 
+            return 'background-color: #fef3c7; color: #92400e; font-weight: bold;' # צהוב
         return ''
 
-    st.dataframe(f_df[['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status']].style.applymap(highlight_st, subset=['status']), use_container_width=True, hide_index=True)
+    st.dataframe(
+        f_df[['id', 'company', 'date', 'due_date', 'amount', 'received_amount', 'status']].style.applymap(highlight_st, subset=['status']), 
+        use_container_width=True, 
+        hide_index=True
+    )
     
     st.divider()
 
@@ -99,15 +107,20 @@ if not df_raw.empty:
                 st.info("No notes yet.")
         
         ci1, ci2, ci3 = st.columns([2, 1, 1])
-        with ci1: ent = st.text_input("New Note:")
-        with ci2: rec = st.number_input("Received:", value=float(row_data['received_amount']), key=f"r_{sid}")
-        with ci3: nst = st.selectbox("Status:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], index=0)
+        with ci1: 
+            ent = st.text_input("New Note:")
+        with ci2: 
+            rec = st.number_input("Received:", value=float(row_data['received_amount']), key=f"r_{sid}")
+        with ci3: 
+            nst = st.selectbox("Status:", ["Sent", "Paid", "Overdue", "Partial", "Sent Reminder"], index=0)
         
         if st.button("Save Update", use_container_width=True):
-            if ent: add_log_entry(sid, ent)
+            if ent: 
+                add_log_entry(sid, ent)
             supabase.table("billing_history").update({"status": nst, "received_amount": float(rec)}).eq("id", sid).execute()
-            st.success("Updated!")
-            time.sleep(0.5); st.rerun()
+            st.success(f"Update Saved for {row_data['company']}!")
+            time.sleep(0.5)
+            st.rerun()
 
     st.divider()
 
@@ -119,10 +132,17 @@ if not df_raw.empty:
 
         if st.button("🚀 Execute Batch", use_container_width=True):
             to_up = sel_bulk[sel_bulk['Select'] == True]
-            for _, row in to_up.iterrows():
-                amt, rcv = float(row['amount']), float(row['received_amount'])
-                fin_rcv = amt if rcv == 0 else rcv
-                fin_stat = "Paid" if (amt - fin_rcv) <= 0 else "Partial"
-                supabase.table("billing_history").update({"status": fin_stat, "received_amount": fin_rcv}).eq("id", int(row['id'])).execute()
-                add_log_entry(row['id'], f"Batch Update: ${fin_rcv} received. Status: {fin_stat}")
-            st.success("Batch Done!"); time.sleep(1); st.rerun()
+            if to_up.empty:
+                st.warning("Please select at least one record.")
+            else:
+                for _, row in to_up.iterrows():
+                    amt, rcv = float(row['amount']), float(row['received_amount'])
+                    fin_rcv = amt if rcv == 0 else rcv
+                    fin_stat = "Paid" if (amt - fin_rcv) <= 0 else "Partial"
+                    supabase.table("billing_history").update({"status": fin_stat, "received_amount": fin_rcv}).eq("id", int(row['id'])).execute()
+                    add_log_entry(row['id'], f"Batch Update: ${fin_rcv} received. Status: {fin_stat}")
+                st.success("Batch Done!")
+                time.sleep(1)
+                st.rerun()
+else:
+    st.info("No records found in the database.")
