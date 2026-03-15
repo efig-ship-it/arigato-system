@@ -7,7 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
 from supabase import create_client
 
-# --- 1. חיבור ישיר ל-SUPABASE ---
+# --- 1. CORE FUNCTIONS ---
 @st.cache_resource
 def init_connection():
     u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
@@ -24,7 +24,7 @@ def get_cloud_history():
         df['due_date_obj'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
     return df
 
-# --- 2. עיצוב הממשק ---
+# --- 2. UI STYLE ---
 st.set_page_config(page_title="Tuesday | Dispatch", layout="wide")
 st.markdown("""
     <style>
@@ -51,8 +51,13 @@ risk_cleared, detective_cleared = True, True
 if up_ex:
     df_history = get_cloud_history()
     try:
+        # קריאת הקובץ - כאן אני מכריח אותו לקרוא את הגיליון הראשון בצורה נקייה
         df_ex = pd.read_excel(up_ex)
-        # נירמול עמודות - קריטי!
+        
+        # הדפסת עמודות לצורך ניפוי שגיאות (Debug) - תראה את זה במסך אם יש בעיה
+        found_cols = [str(c).strip() for c in df_ex.columns]
+        
+        # נירמול עמודות (הופך הכל לאותיות קטנות ומוריד רווחים)
         df_ex.columns = [str(c).lower().strip() for c in df_ex.columns]
         
         current_companies = [str(c).strip() for c in df_ex.iloc[:, 0].dropna().unique()]
@@ -79,24 +84,29 @@ if up_ex:
 
 sc1, sc2 = st.columns(2); u_m = sc1.text_input("Gmail Account"); u_p = sc2.text_input("App Password", type="password")
 
-# --- 3. שליחה ---
+# --- 3. הזרקה וסנכרון ---
 if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_ex and uploaded_files and risk_cleared and detective_cleared)):
     try:
+        # טעינה מחדש וניקוי
         df_master = pd.read_excel(up_ex).dropna(how='all')
+        original_cols = list(df_master.columns)
         df_master.columns = [str(c).lower().strip() for c in df_master.columns]
         
-        # חיפוש גמיש של עמודות
-        amt_col = next((c for c in df_master.columns if 'amount' in c or 'סכום' in c), None)
+        # חיפוש עמודת ה-Amount (חיפוש גמיש מאוד)
+        amt_col = next((c for c in df_master.columns if 'amount' in c or 'סכום' in c or 'סה"כ' in c), None)
         due_col = [c for c in df_master.columns if 'due' in c.lower()]
         
         if not amt_col:
-            st.error("❌ לא נמצאה עמודת סכום (amount) באקסל! בדוק את שם העמודה.")
+            st.error(f"❌ עמודת הסכום לא זוהתה! העמודות שמצאתי הן: {original_cols}")
             st.stop()
+
+        # המרת עמודת הסכום למספרים (למקרה שיש שם טקסט)
+        df_master[amt_col] = pd.to_numeric(df_master[amt_col], errors='coerce').fillna(0.0)
 
         # סכימה לפי חברה (עמודה ראשונה)
         summary = df_master.groupby(df_master.columns[0]).agg({
             amt_col: 'sum',
-            df_master.columns[1]: 'first'  # מייל
+            df_master.columns[1]: 'first'  # המיילים נמצאים בעמודה השנייה
         }).reset_index()
 
         server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(u_m.strip(), u_p.strip().replace(" ",""))
@@ -115,7 +125,7 @@ if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_e
                     msg = MIMEMultipart()
                     msg['Subject'] = f"Invoice - {comp}"
                     msg['To'] = ", ".join(emails)
-                    msg.attach(MIMEText(f"Hello {comp},\nAttached invoices. Total amount: ₪{total_amt:,.2f}", 'plain'))
+                    msg.attach(MIMEText(f"Hello {comp},\n\nAttached invoices for your review.\nTotal Amount: ₪{total_amt:,.2f}", 'plain'))
                     
                     for f in files:
                         part = MIMEApplication(f.getvalue(), Name=f.name)
@@ -124,7 +134,7 @@ if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_e
                     
                     server.send_message(msg)
                     
-                    # Supabase
+                    # עדכון Supabase עם הסכום שנסכם מהאקסל
                     it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
                     orig_row = df_master[df_master.iloc[:, 0].astype(str).str.strip() == comp].iloc[0]
                     day_val = int(orig_row[due_col[0]]) if due_col and pd.notna(orig_row[due_col[0]]) else 15
@@ -135,5 +145,6 @@ if st.button("🚀 Start Dispatch", use_container_width=True, disabled=not (up_e
                         "status": "Sent", "due_date": dv, "sender": u_m, "received_amount": 0
                     }).execute()
 
-        server.quit(); sh.empty(); st.balloons(); st.success("Done!"); time.sleep(1); st.rerun()
-    except Exception as e: st.error(f"Error: {e}")
+        server.quit(); sh.empty(); st.balloons(); st.success("Dispatch Completed!"); time.sleep(1); st.rerun()
+    except Exception as e: 
+        st.error(f"Error: {e}")
