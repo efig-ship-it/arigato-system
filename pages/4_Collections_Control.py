@@ -14,10 +14,13 @@ if not df_raw.empty:
     cf1, cf2 = st.columns(2)
     c_sel = cf1.multiselect("Search Companies", sorted(df_raw['company'].unique()))
     
-    # Filter dates
-    min_date = df_raw['due_date_obj'].min()
-    max_date = df_raw['due_date_obj'].max()
-    c_due = cf2.date_input("Filter Due Date", value=(min_date, max_date))
+    # Filter dates safely
+    try:
+        min_d = df_raw['due_date_obj'].min()
+        max_d = df_raw['due_date_obj'].max()
+        c_due = cf2.date_input("Filter Due Date", value=(min_d, max_d))
+    except:
+        c_due = None
     
     f_df = df_raw.copy()
     if c_sel: 
@@ -25,7 +28,6 @@ if not df_raw.empty:
     if isinstance(c_due, tuple) and len(c_due) == 2: 
         f_df = f_df[(f_df['due_date_obj'] >= c_due[0]) & (f_df['due_date_obj'] <= c_due[1])]
     
-    # Highlights
     def highlight_st(val):
         if val == 'Paid': return 'background-color: #e6fffa; color: #234e52; font-weight: bold;'
         if val == 'Overdue': return 'background-color: #fff5f5; color: #e53e3e; font-weight: bold; border: 1px solid #e53e3e;'
@@ -57,8 +59,11 @@ if not df_raw.empty:
         
         if st.button("Save Update"):
             if ent: add_log_entry(sid, ent)
-            new_bal = float(row_data['amount']) - float(rec)
-            supabase.table("billing_history").update({"status": nst, "received_amount": float(rec), "balance": new_bal}).eq("id", sid).execute()
+            # עדכון ללא עמודת balance ליתר ביטחון
+            supabase.table("billing_history").update({
+                "status": nst, 
+                "received_amount": float(rec)
+            }).eq("id", sid).execute()
             st.success("Updated.")
             time.sleep(0.5); st.rerun()
 
@@ -85,26 +90,28 @@ if not df_raw.empty:
         if rows_to_update.empty:
             st.warning("Please select at least one row.")
         else:
-            for _, row in rows_to_update.iterrows():
-                total_amt = float(row['amount'])
-                input_received = float(row['received_amount'])
+            try:
+                for _, row in rows_to_update.iterrows():
+                    total_amt = float(row['amount'])
+                    input_received = float(row['received_amount'])
+                    
+                    # הלוגיקה שלך: אם 0 -> הכל. אם לא -> מה שכתבת.
+                    if input_received == 0:
+                        final_received = total_amt
+                    else:
+                        final_received = input_received
+                    
+                    final_status = "Paid" if (total_amt - final_received) <= 0 else "Partial"
+                    
+                    # עדכון רק של עמודות שאנחנו בטוחים שקיימות
+                    supabase.table("billing_history").update({
+                        "status": final_status, 
+                        "received_amount": final_received
+                    }).eq("id", int(row['id'])).execute()
+                    
+                    add_log_entry(row['id'], f"Batch Update: Received {final_received}$. Status: {final_status}")
                 
-                # לוגיקה: אם הסכום נשאר 0, קח את הכל. אם שינית סכום, קח את מה שרשמת.
-                if input_received == 0:
-                    final_received = total_amt
-                else:
-                    final_received = input_received
-                
-                new_balance = total_amt - final_received
-                final_status = "Paid" if new_balance <= 0 else "Partial"
-                
-                supabase.table("billing_history").update({
-                    "status": final_status, 
-                    "received_amount": final_received,
-                    "balance": new_balance
-                }).eq("id", row['id']).execute()
-                
-                add_log_entry(row['id'], f"Batch Update: Received {final_received}$. Status: {final_status}")
-            
-            st.success("Batch Processing Complete.")
-            time.sleep(1); st.rerun()
+                st.success("Batch Processing Complete.")
+                time.sleep(1); st.rerun()
+            except Exception as e:
+                st.error(f"Database Error: {e}")
