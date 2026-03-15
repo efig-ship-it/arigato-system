@@ -1,17 +1,24 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, re
+import smtplib, time, re, sys, os
 from datetime import datetime, timedelta, date
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
-# ייבוא פונקציות הליבה
-from app import get_cloud_history, supabase, extract_total_amount_from_file
+
+# --- תיקון נתיב לייבוא מ-app.py ---
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# ייבוא פונקציות הליבה מה-Bridge (app.py)
+try:
+    from app import get_cloud_history, supabase, extract_total_amount_from_file
+except ImportError:
+    st.error("Could not import core functions from app.py. Please ensure app.py is in the root folder.")
 
 # --- SIDEBAR BRANDING ---
 st.sidebar.markdown('<p class="tuesday-header">Tuesday</p>', unsafe_allow_html=True)
 
-# --- CSS STYLES (כולל המזוודה הגדולה והזזה) ---
+# --- CSS STYLES ---
 st.markdown("""
     <style>
     .tuesday-header {
@@ -22,13 +29,12 @@ st.markdown("""
     .risk-box { background-color: #FEE2E2; border: 1px solid #EF4444; padding: 15px; border-radius: 10px; color: #991B1B; margin: 10px 0; }
     .detective-box { background-color: #FEF3C7; border: 1px solid #F59E0B; padding: 15px; border-radius: 10px; color: #92400E; margin: 10px 0; }
     
-    /* אנימציית המזוודה הגדולה */
     .suitcase-container {
         display: flex; justify-content: center; align-items: center; 
         padding: 40px; margin: 20px 0;
     }
     .big-suitcase {
-        font-size: 100px; /* גודל המזוודה */
+        font-size: 100px;
         animation: suitcase-move 1.5s infinite ease-in-out;
     }
     @keyframes suitcase-move {
@@ -77,7 +83,7 @@ with center_col:
                     st.markdown(f'<div class="risk-box">⚠️ <b>Risk:</b> Critical overdue debts detected.</div>', unsafe_allow_html=True)
                     risk_cleared = False
 
-            # 2. DETECTIVE ALERT (דו-כיווני)
+            # 2. DETECTIVE ALERT
             missing_in_files = [c for c in current_companies if not any(c.lower() in fn.lower() for fn in file_names)]
             extra_files = [fn for fn in file_names if not any(c.lower() in fn.lower() for c in current_companies)]
 
@@ -89,7 +95,8 @@ with center_col:
                     if extra_files:
                         st.markdown(f'<div class="detective-box">📁 <b>Unrecognized:</b> {", ".join(extra_files)}</div>', unsafe_allow_html=True)
                     detective_cleared = False
-        except: pass
+        except Exception as e: 
+            st.error(f"Error reading Excel: {e}")
 
     st.divider()
 
@@ -112,29 +119,66 @@ with center_col:
         try:
             df_master = pd.read_excel(up_ex).dropna(how='all')
             due_col = [c for c in df_master.columns if 'due' in c.lower()]
-            server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls()
+            
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.starttls()
             server.login(u_m.strip(), u_p.strip().replace(" ",""))
             
             status_placeholder = st.empty()
             with status_placeholder.container():
-                # הצגת המזוודה הגדולה והזזה מהחוזה
                 st.markdown('<div class="suitcase-container"><div class="big-suitcase">💼</div></div>', unsafe_allow_html=True)
                 with st.spinner("Tuesday is dispatching..."):
                     for _, row in df_master.iterrows():
                         comp = str(row.iloc[0]).strip()
+                        comp_email = str(row.iloc[1]).strip()
                         comp_files = [f for f in uploaded_files if comp.lower() in f.name.lower()]
+                        
                         if comp_files:
-                            total_amt = sum([extract_total_amount_from_file(f) for f in comp_files])
+                            # חילוץ סכום (שימוש בפונקציה מ-app.py)
+                            total_amt = 0.0
+                            for f in comp_files:
+                                # הערה: כדי לחלץ סכום מ-PDF באמת נדרשת ספריה כמו pdfplumber, 
+                                # כרגע הפונקציה ב-app.py מחפשת בטקסט גולמי.
+                                try:
+                                    # אם זה קובץ גולמי (למשל טקסט):
+                                    file_text = f.getvalue().decode('utf-8', errors='ignore')
+                                    total_amt += extract_total_amount_from_file(file_text)
+                                except: pass
+
                             msg = MIMEMultipart()
                             msg['Subject'] = f"Invoice - {comp}"
-                            msg['To'] = str(row.iloc[1])
-                            msg.attach(MIMEText(f"Dear {comp}, attached invoices.", 'plain'))
-                            for f in comp_files: msg.attach(MIMEApplication(f.getvalue(), Name=f.name))
+                            msg['From'] = u_m
+                            msg['To'] = comp_email
+                            msg.attach(MIMEText(f"Dear {comp},\n\nPlease find attached your invoices for {sel_m} {sel_y}.\n\nBest regards,\nTuesday Billing System", 'plain'))
+                            
+                            for f in comp_files:
+                                part = MIMEApplication(f.getvalue(), Name=f.name)
+                                part['Content-Disposition'] = f'attachment; filename="{f.name}"'
+                                msg.attach(part)
+                            
                             server.send_message(msg)
                             
-                            it = (datetime.now() + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
-                            dv = f"{sel_y}-{months.index(sel_m)+1:02d}-{int(row[due_col[0]]) if due_col else 15:02d}"
-                            supabase.table("billing_history").insert({"date": it, "company": comp, "amount": total_amt, "status": "Sent", "due_date": dv, "sender": u_m}).execute()
+                            # עדכון Supabase
+                            it = datetime.now().strftime("%d/%m/%Y %H:%M")
+                            # חישוב תאריך יעד (Due Date)
+                            day_val = int(row[due_col[0]]) if due_col else 15
+                            dv = f"{sel_y}-{months.index(sel_m)+1:02d}-{day_val:02d}"
+                            
+                            supabase.table("billing_history").insert({
+                                "date": it, 
+                                "company": comp, 
+                                "amount": total_amt, 
+                                "status": "Sent", 
+                                "due_date": dv, 
+                                "sender": u_m
+                            }).execute()
             
-            server.quit(); status_placeholder.empty(); st.balloons(); st.success("Done!"); time.sleep(1); st.rerun()
-        except Exception as e: st.error(f"Error: {e}")
+            server.quit()
+            status_placeholder.empty()
+            st.balloons()
+            st.success("Dispatch Completed Successfully!")
+            time.sleep(2)
+            st.rerun()
+            
+        except Exception as e: 
+            st.error(f"Dispatch Error: {e}")
