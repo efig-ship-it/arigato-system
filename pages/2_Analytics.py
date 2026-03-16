@@ -1,53 +1,125 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import date, timedelta
-from app import get_cloud_history
+import plotly.graph_objects as go
+from supabase import create_client
+from datetime import datetime
 
-st.title("Analytics Dashboard 📊")
-df_raw = get_cloud_history()
+# --- 1. חיבור לבסיס הנתונים (עצמאי לחלוטין) ---
+@st.cache_resource
+def init_connection():
+    u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
+    k = st.secrets["SUPABASE_KEY"].strip().replace('"', '')
+    return create_client(u, k)
 
-if not df_raw.empty:
-    today = date.today()
-    risk_v = df_raw[df_raw['status'] == 'Overdue']['balance'].sum()
-    forecast_v = df_raw[(df_raw['status'] != 'Paid') & (df_raw['due_date_obj'] >= today) & (df_raw['due_date_obj'] <= today + timedelta(days=7))]['amount'].sum()
-    c1, c2 = st.columns(2)
-    c1.markdown(f'<div class="alert-box" style="border-right-color:#e53e3e; background-color:#fff5f5;"><p style="color:#c53030; font-weight:700;">🚨 Total Overdue</p><h2>${risk_v:,.0f}</h2></div>', unsafe_allow_html=True)
-    c2.markdown(f'<div class="alert-box" style="border-right-color:#38a169; background-color:#f0fff4;"><p style="color:#2f855a; font-weight:700;">🟢 Next 7d Forecast</p><h2>${forecast_v:,.0f}</h2></div>', unsafe_allow_html=True)
+supabase = init_connection()
+
+def get_data():
+    res = supabase.table("billing_history").select("*").execute()
+    df = pd.DataFrame(res.data)
+    if not df.empty:
+        # המרת שדות למספרים ותאריכים
+        df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
+        df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
+        df['balance'] = df['amount'] - df['received_amount']
+        # המרת תאריך לפורמט פייתון
+        df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+        df['month_year'] = df['date_dt'].dt.strftime('%m/%Y')
+    return df
+
+# --- 2. עיצוב הממשק ---
+st.set_page_config(page_title="Tuesday | Analytics", layout="wide")
+
+st.markdown("""
+    <style>
+    .main-title { font-size: 32px; font-weight: bold; color: #1E3A8A; border-bottom: 2px solid #1E3A8A; padding-bottom: 10px; margin-bottom: 20px; }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown('<p class="main-title">Financial Performance Dashboard 📊</p>', unsafe_allow_html=True)
+
+# כפתור ריענון בסרגל הצדי
+if st.sidebar.button("🔄 Refresh Data"):
+    st.cache_resource.clear()
+    st.rerun()
+
+# --- 3. עיבוד נתונים ---
+df = get_data()
+
+if df.empty:
+    st.warning("לא נמצאו נתונים להצגה. וודא שביצעת שליחות בעמוד 1.")
+    st.stop()
+
+# חישוב מדדים מרכזיים (KPIs)
+total_billed = df['amount'].sum()
+total_received = df['received_amount'].sum()
+total_pending = df['balance'].sum()
+collection_rate = (total_received / total_billed * 100) if total_billed > 0 else 0
+
+# תצוגת כרטיסי מדדים
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("סה\"כ חויב (Billed)", f"₪{total_billed:,.0f}")
+m2.metric("סה\"כ נגבה (Collected)", f"₪{total_received:,.0f}")
+m3.metric("יתרה פתוחה (Outstanding)", f"₪{total_pending:,.0f}", delta=f"{collection_rate:.1f}% גבייה", delta_color="normal")
+m4.metric("מספר תיקים", len(df))
+
+st.divider()
+
+# --- 4. גרפים ---
+c1, c2 = st.columns(2)
+
+with c1:
+    st.subheader("התפלגות לפי סטטוס")
+    status_summary = df.groupby('status')['amount'].sum().reset_index()
+    fig_pie = px.pie(status_summary, values='amount', names='status', 
+                     hole=0.4, 
+                     color='status',
+                     color_discrete_map={'Paid':'#10B981', 'Sent':'#3B82F6', 'Overdue':'#EF4444', 'Partial':'#F59E0B'})
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+with c2:
+    st.subheader("מגמת חיוב מול גבייה")
+    trend_df = df.dropna(subset=['date_dt']).sort_values('date_dt')
+    trend_df = trend_df.groupby('month_year').agg({'amount':'sum', 'received_amount':'sum'}).reset_index()
     
-    st.divider(); f1, f2, f3 = st.columns(3)
-    sel_c = f1.multiselect("Companies", sorted(df_raw['company'].unique()))
-    m_s_min = df_raw['date_sent_obj'].min() if 'date_sent_obj' in df_raw.columns else today
-    s_rng = f2.date_input("Sent Range", value=(m_s_min, df_raw['date_sent_obj'].max() if 'date_sent_obj' in df_raw.columns else today))
-    d_rng = f3.date_input("Due Range", value=(df_raw['due_date_obj'].min(), df_raw['due_date_obj'].max()))
-    df = df_raw.copy()
-    if sel_c: df = df[df['company'].isin(sel_c)]
-    if isinstance(s_rng, tuple) and len(s_rng) == 2: df = df[(df['date_sent_obj'] >= s_rng[0]) & (df['date_sent_obj'] <= s_rng[1])]
-    if isinstance(d_rng, tuple) and len(d_rng) == 2: df = df[(df['due_date_obj'] >= d_rng[0]) & (df['due_date_obj'] <= d_rng[1])]
-    
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("CEI Index", f"{(df[df['due_date_obj'] <= today]['received_amount'].sum()/df[df['due_date_obj'] <= today]['amount'].sum()*100):.1f}%" if df[df['due_date_obj'] <= today]['amount'].sum()>0 else "0%")
-    m2.metric("Outstanding", f"${df['balance'].sum():,.0f}"); m3.metric("Billed Total", f"${df['amount'].sum():,.0f}"); m4.metric("Reminded Debt", f"${df[df['status'] == 'Sent Reminder']['balance'].sum():,.0f}")
-    
-    st.divider(); g1, g2 = st.columns(2)
-    with g1:
-        st.subheader("Status Distribution")
-        st.plotly_chart(px.pie(df.groupby('status')['amount'].sum().reset_index(), values='amount', names='status', color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
-    with g2:
-        st.subheader("Top 5 Debtors")
-        debtors = df.groupby('company')['balance'].sum().sort_values(ascending=False).head(5).reset_index()
-        if not debtors[debtors['balance']>0].empty:
-            st.plotly_chart(px.bar(debtors[debtors['balance']>0], x='balance', y='company', orientation='h', color='balance', color_continuous_scale='Reds'), use_container_width=True)
-    
-    st.divider(); st.subheader("Data Analysis (Pivots)")
-    st.write("**Company Pivot**"); st.dataframe(df.pivot_table(index='company', columns='status', values='amount', aggfunc='sum', fill_value=0).style.format("${:,.0f}"), use_container_width=True)
-    pc1, pc2 = st.columns(2)
-    with pc1: st.write("**Monthly Performance**"); st.dataframe(df.pivot_table(index='month_sent', values='amount', aggfunc='sum').style.format("${:,.0f}"), use_container_width=True)
-    with pc2: 
-        st.write("**Avg Payment Speed**"); spd = df[df['days_to_pay'].notna()]
-        if not spd.empty: st.dataframe(spd.groupby('company')['days_to_pay'].mean().reset_index().style.format({"days_to_pay": "{:.1f} Days"}), use_container_width=True)
-    
-    st.divider(); st.subheader("Efficiency: Billed vs Received (Cumulative Trend)")
-    trend = df.groupby('due_date_obj')[['amount', 'received_amount']].sum().cumsum().reset_index()
-    fig_t = px.line(trend, x='due_date_obj', y=['amount', 'received_amount'], markers=True, color_discrete_map={'amount': '#003366', 'received_amount': '#64ffda'})
-    st.plotly_chart(fig_t, use_container_width=True)
+    fig_trend = go.Figure()
+    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['amount'], name='חויב', marker_color='#3B82F6'))
+    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['received_amount'], name='נגבה', marker_color='#10B981'))
+    fig_trend.update_layout(barmode='group', xaxis_title="חודש/שנה")
+    st.plotly_chart(fig_trend, use_container_width=True)
+
+st.divider()
+
+# --- 5. טבלת פיבוט - סיכום לפי חברה ---
+st.subheader("ניתוח גבייה לפי חברה (Pivot Analysis)")
+
+pivot_table = df.groupby('company').agg({
+    'amount': 'sum',
+    'received_amount': 'sum',
+    'balance': 'sum',
+    'id': 'count'
+}).rename(columns={'id': 'חשבוניות'}).reset_index()
+
+# חישוב אחוז גבייה פר חברה
+pivot_table['% גבייה'] = (pivot_table['received_amount'] / pivot_table['amount'] * 100).round(1)
+pivot_table = pivot_table.sort_values(by='balance', ascending=False)
+
+# הצגת הטבלה עם עיצוב מותנה
+st.dataframe(
+    pivot_table.style.background_gradient(subset=['balance'], cmap="Reds")
+    .format({'amount': '₪{:,.0f}', 'received_amount': '₪{:,.0f}', 'balance': '₪{:,.0f}', '% גבייה': '{:.1f}%'}),
+    use_container_width=True, hide_index=True
+)
+
+# --- 6. 5 החייבים הגדולים ---
+st.subheader("⚠️ 5 החייבים הגדולים ביותר")
+top_5 = pivot_table[pivot_table['balance'] > 0].head(5)
+if not top_5.empty:
+    fig_debt = px.bar(top_5, x='company', y='balance', 
+                      text='balance',
+                      labels={'balance': 'חוב פתוח', 'company': 'חברה'},
+                      color='balance', color_continuous_scale='Reds')
+    fig_debt.update_traces(texttemplate='₪%{text:,.0f}', textposition='outside')
+    st.plotly_chart(fig_debt, use_container_width=True)
+else:
+    st.success("אין חובות פתוחים במערכת!")
