@@ -27,80 +27,64 @@ def get_overdue_data():
             return df
     return pd.DataFrame()
 
-def get_hebrew_month(date_str):
-    try:
-        dt = pd.to_datetime(date_str)
-        months = {
-            1: "ינואר", 2: "פברואר", 3: "מרץ", 4: "אפריל", 5: "מאי", 6: "יוני",
-            7: "יולי", 8: "אוגוסט", 9: "ספטמבר", 10: "אוקטובר", 11: "נובמבר", 12: "דצמבר"
-        }
-        return months.get(dt.month, "")
-    except:
-        return "החודש האחרון"
-
 # --- 2. UI & STYLE ---
 st.set_page_config(page_title="Tuesday | Reminders", layout="wide")
 
 st.markdown("""
     <style>
-    .recovery-title { font-size: 32px; font-weight: 800; color: #DC2626; margin-bottom: 20px; text-align: right; direction: rtl; }
+    .recovery-title { font-size: 32px; font-weight: 800; color: #DC2626; margin-bottom: 20px; }
     .stCheckbox { transform: scale(1.2); }
-    .status-msg { padding: 10px; border-radius: 5px; margin-bottom: 15px; direction: rtl; text-align: right; }
     </style>
 """, unsafe_allow_html=True)
 
-# כותרת וסנכרון
+# Title & Sync
 t_col, r_col = st.columns([5, 1])
 with t_col:
-    st.markdown('<p class="recovery-title">ניהול תזכורות תשלום 🚨</p>', unsafe_allow_html=True)
+    st.markdown('<p class="recovery-title">Payment Reminders Center 🚨</p>', unsafe_allow_html=True)
 with r_col:
-    if st.button("🔄 סנכרון נתונים"):
+    if st.button("🔄 Sync Data"):
         st.cache_data.clear()
         st.rerun()
 
-# --- 3. הטרנזקציות (מופיעות מיד) ---
+# --- 3. OVERDUE OVERVIEW (Immediate) ---
 df_overdue = get_overdue_data()
 
 if df_overdue.empty:
-    st.success("אין חובות פתוחים במערכת! 🎉")
+    st.success("No overdue transactions found in the cloud! 🎉")
     st.stop()
 
-st.subheader(f"נמצאו {len(df_overdue)} עסקאות בחריגה (Overdue)")
-
-# טבלה להצגה בלבד של החריגות
+st.subheader(f"Found {len(df_overdue)} Overdue Transactions")
 st.dataframe(
     df_overdue[['company', 'due_date', 'balance']],
     column_config={
-        "company": "חברה",
-        "due_date": "מועד תשלום",
-        "balance": st.column_config.NumberColumn("יתרת חוב", format="₪%.2f")
+        "company": "Company Name",
+        "due_date": "Due Date",
+        "balance": st.column_config.NumberColumn("Balance Due", format="₪%.2f")
     },
     use_container_width=True, hide_index=True
 )
 
 st.divider()
 
-# --- 4. הגדרות שליחה וחיבור (עם המדריך צמוד) ---
-st.markdown("### 🛠️ הגדרות שליחה")
+# --- 4. SETUP & GUIDE ---
+st.markdown("### 🛠️ Mailing Setup")
 c_mail, c_pass = st.columns(2)
 
 with c_mail:
-    gmail_user = st.text_input("כתובת ה-Gmail שלך", placeholder="example@gmail.com")
-    up_contacts = st.file_uploader("📁 העלה קובץ אקסל (אנשי קשר)", type=['xlsx'])
+    gmail_user = st.text_input("Your Gmail Address", placeholder="example@gmail.com")
+    up_contacts = st.file_uploader("📁 Upload Mailing List (Excel)", type=['xlsx'])
 
 with c_pass:
-    gmail_pass = st.text_input("סיסמת אפליקציה (16 תווים)", type="password")
-    with st.expander("💡 איך משיגים סיסמת אפליקציה?", expanded=False):
-        st.markdown("""
-        <div style="direction: rtl; text-align: right; font-size: 14px;">
-        1. היכנס ל-<b>Google Account</b> -> <b>Security</b>.<br>
-        2. וודא ש-<b>2-Step Verification</b> פעיל.<br>
-        3. חפש <b>"App Passwords"</b> בשורת החיפוש.<br>
-        4. צור סיסמה חדשה (קרא לה Tuesday) והעתק את 16 התווים לכאן.
-        </div>
-        """, unsafe_allow_html=True)
+    gmail_pass = st.text_input("Gmail App Password", type="password", help="16-character code from Google")
+    with st.expander("💡 How to get an App Password?", expanded=False):
+        st.markdown(f"""
+        1. Go to your [Google Account Security](https://myaccount.google.com/security).
+        2. Ensure **2-Step Verification** is ON.
+        3. Search for **"App Passwords"** in the top search bar.
+        4. Create a new password (name it 'Tuesday') and copy the 16-character code here.
+        """)
 
-# --- 5. הצלבת נתונים ושליחה ---
+# --- 5. DATA MERGE & EXECUTION ---
 if up_contacts:
     try:
         df_emails = pd.read_excel(up_contacts)
@@ -111,13 +95,13 @@ if up_contacts:
         df_final = pd.merge(df_overdue, df_emails[[comp_col, email_col]], left_on='company', right_on=comp_col, how='left')
 
         st.markdown("---")
-        st.markdown("### 🚀 בחירת חברות לשליחה")
+        st.markdown("### 🚀 Select Companies to Remind")
         
         selected_indices = []
         h1, h2, h3, h4 = st.columns([0.5, 2, 2, 2])
-        h2.write("**חברה**")
-        h3.write("**יתרת חוב**")
-        h4.write("**אימייל יעד**")
+        h2.write("**Company**")
+        h3.write("**Balance**")
+        h4.write("**Email Address**")
 
         for idx, row in df_final.iterrows():
             col1, col2, col3, col4 = st.columns([0.5, 2, 2, 2])
@@ -128,24 +112,24 @@ if up_contacts:
             with col3:
                 st.write(f"₪{row['balance']:,.2f}")
             with col4:
-                email_display = row[email_col] if pd.notna(row[email_col]) else "⚠️ חסר מייל"
+                email_display = row[email_col] if pd.notna(row[email_col]) else "⚠️ Missing Email"
                 st.write(f"`{email_display}`")
             if is_selected:
                 selected_indices.append(idx)
 
-        # כפתור ביצוע
-        if st.button("שלח תזכורות למסומנים", use_container_width=True, type="primary"):
+        # Execute Button
+        if st.button("SEND REMINDERS", use_container_width=True, type="primary"):
             if not selected_indices:
-                st.warning("נא לסמן לפחות חברה אחת.")
+                st.warning("Please select at least one company.")
             elif not gmail_user or not gmail_pass:
-                st.error("נא להזין פרטי Gmail וסיסמת אפליקציה.")
+                st.error("Please enter Gmail credentials.")
             else:
                 try:
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
                     server.login(gmail_user.strip(), gmail_pass.strip().replace(" ", ""))
 
-                    # ספינר התקדמות
+                    # Progress Spinner
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
@@ -153,43 +137,46 @@ if up_contacts:
                         row = df_final.iloc[idx]
                         target_email = str(row[email_col])
                         if "@" not in target_email: continue
-
-                        month_name = get_hebrew_month(row['due_date'])
                         
+                        # Get Month Name for Template
+                        month_name = pd.to_datetime(row['due_date']).strftime('%B')
+
                         msg = MIMEMultipart()
-                        msg['Subject'] = f"תזכורת תשלום: {row['company']}"
+                        msg['Subject'] = f"Payment Reminder: {row['company']}"
                         msg['To'] = target_email
                         
-                        body = f"""שלום,
-נכון להיום, התשלום עבור חודש {month_name} טרם הוסדר, וזאת על אף שמועד התשלום חלף.
-דוח חשבוניות פתוחות לתשלום נשלח בתחילת החודש.
+                        body = f"""Dear {row['company']} Team,
 
-אנא הסדירו את התשלום באופן מיידי ועדכנו אותנו עם ביצוע ההעברה.
-אי־הסדרת התשלום עלולה להוביל לסגירת החשבון ולהפסקת השירות.
+As of today, the payment for the month of {month_name} has not yet been settled, even though the payment due date has passed.
+An open invoice report was sent at the beginning of the month.
 
-במידה והתשלום בוצע בימים האחרונים, אנא שלחו אישור העברה ופירוט חשבוניות רלוונטיות.
-בברכה,
-צוות Tuesday"""
+Please settle the payment immediately and update us once the transfer is completed.
+Failure to settle the payment may lead to account suspension and service disruption.
+
+If the payment was made in the last few days, please send us the transfer confirmation.
+
+Best regards,
+Tuesday Accounts Team"""
                         
                         msg.attach(MIMEText(body, 'plain', 'utf-8'))
                         server.send_message(msg)
 
-                        # עדכון הסטטוס בענן
+                        # Update Cloud
                         supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
                         
-                        # עדכון ספינר
+                        # Update Progress
                         percent = (i + 1) / len(selected_indices)
                         progress_bar.progress(percent)
-                        status_text.text(f"שולח ל-{row['company']} ({i+1}/{len(selected_indices)})...")
+                        status_text.text(f"Sending to {row['company']} ({i+1}/{len(selected_indices)})...")
 
                     server.quit()
                     st.balloons()
-                    st.success("השליחה הסתיימה בהצלחה!")
+                    st.success("All reminders sent successfully!")
                     time.sleep(2)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"שגיאה: {e}")
+                    st.error(f"Error: {e}")
     except Exception as e:
-        st.error(f"שגיאה בקובץ האקסל: {e}")
+        st.error(f"Excel Error: {e}")
 else:
-    st.info("💡 המתן להעלאת קובץ אקסל של אנשי קשר כדי להפעיל את אפשרות השליחה.")
+    st.info("💡 Upload the Mailing List Excel to enable sending.")
