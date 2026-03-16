@@ -15,16 +15,21 @@ def init_connection():
 supabase = init_connection()
 
 def get_overdue_data():
-    res = supabase.table("billing_history").select("*").execute()
-    full_df = pd.DataFrame(res.data)
-    if not full_df.empty:
-        full_df['status_check'] = full_df['status'].astype(str).str.strip().str.lower()
-        df = full_df[full_df['status_check'] == 'overdue'].copy()
-        if not df.empty:
-            df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
-            df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
-            df['balance'] = df['amount'] - df['received_amount']
-            return df
+    # Spinner for cloud sync
+    with st.spinner("Fetching Overdue Transactions..."):
+        try:
+            res = supabase.table("billing_history").select("*").execute()
+            full_df = pd.DataFrame(res.data)
+            if not full_df.empty:
+                full_df['status_check'] = full_df['status'].astype(str).str.strip().str.lower()
+                df = full_df[full_df['status_check'] == 'overdue'].copy()
+                if not df.empty:
+                    df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
+                    df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
+                    df['balance'] = df['amount'] - df['received_amount']
+                    return df
+        except Exception as e:
+            st.error(f"Cloud Connection Error: {e}")
     return pd.DataFrame()
 
 # --- 2. UI & STYLE ---
@@ -33,11 +38,12 @@ st.set_page_config(page_title="Tuesday | Reminders", layout="wide")
 st.markdown("""
     <style>
     .recovery-title { font-size: 32px; font-weight: 800; color: #DC2626; margin-bottom: 20px; }
-    .stCheckbox { transform: scale(1.2); }
+    .stCheckbox { transform: scale(1.4); } 
+    .stProgress > div > div > div > div { background-color: #DC2626; }
     </style>
 """, unsafe_allow_html=True)
 
-# Title & Sync
+# Header
 t_col, r_col = st.columns([5, 1])
 with t_col:
     st.markdown('<p class="recovery-title">Payment Reminders Center 🚨</p>', unsafe_allow_html=True)
@@ -46,7 +52,7 @@ with r_col:
         st.cache_data.clear()
         st.rerun()
 
-# --- 3. MAILING SETUP (TOP) ---
+# --- 3. MAILING SETUP ---
 st.markdown("### 🛠️ Step 1: Mailing Setup")
 c_mail, c_pass = st.columns(2)
 
@@ -67,14 +73,14 @@ with c_pass:
 st.divider()
 
 # --- 4. THE MASTER TABLE ---
-st.markdown("### 🚀 Step 2: Select & Send Reminders")
+st.markdown("### 🚀 Step 2: Selection & Execution")
 df_overdue = get_overdue_data()
 
 if df_overdue.empty:
     st.success("No overdue transactions found in the cloud! 🎉")
     st.stop()
 
-# Load and Merge Emails if file exists
+# Email Mapping Logic
 email_map = {}
 if up_contacts:
     try:
@@ -87,48 +93,52 @@ if up_contacts:
     except Exception as e:
         st.error(f"Error reading Excel: {e}")
 
-# Display Unified Table
+# Unified Display Table
 selected_rows = []
-h1, h2, h3, h4 = st.columns([0.5, 2, 2, 2])
-h2.write("**Company**")
+h1, h2, h3, h4 = st.columns([0.6, 2, 2, 2])
+h2.write("**Company Name**")
 h3.write("**Balance Due**")
-h4.write("**Email Address**")
+h4.write("**Target Email**")
 
 for idx, row in df_overdue.iterrows():
-    col1, col2, col3, col4 = st.columns([0.5, 2, 2, 2])
-    target_email = email_map.get(row['company'], None)
-    
-    with col1:
-        is_selected = st.checkbox("", key=f"send_check_{idx}")
-    with col2:
-        st.write(row['company'])
-    with col3:
-        st.write(f"₪{row['balance']:,.2f}")
-    with col4:
-        if up_contacts:
-            st.write(f"`{target_email}`" if target_email else "⚠️ Not found in file")
-        else:
-            st.write("*Upload file to see email*")
-    
-    if is_selected:
-        row_with_email = row.to_dict()
-        row_with_email['email_contact'] = target_email
-        selected_rows.append(row_with_email)
+    with st.container():
+        col1, col2, col3, col4 = st.columns([0.6, 2, 2, 2])
+        target_email = email_map.get(row['company'], None)
+        
+        with col1:
+            is_selected = st.checkbox("", key=f"send_check_{idx}")
+        with col2:
+            st.write(f"**{row['company']}**")
+        with col3:
+            st.write(f"₪{row['balance']:,.2f}")
+        with col4:
+            if up_contacts:
+                if target_email:
+                    st.success(f"📧 {target_email}")
+                else:
+                    st.error("⚠️ Email not found")
+            else:
+                st.info("Waiting for Excel...")
+        
+        if is_selected:
+            row_dict = row.to_dict()
+            row_dict['email_contact'] = target_email
+            selected_rows.append(row_dict)
 
 st.divider()
 
-# --- 5. EXECUTION ---
-# Button is only active if file is uploaded AND password is provided
+# --- 5. SENDING ENGINE ---
 can_send = up_contacts is not None and len(gmail_pass) > 0
 
-if st.button("SEND REMINDERS", use_container_width=True, type="primary", disabled=not can_send):
+if st.button("🚀 EXECUTE SENDING", use_container_width=True, type="primary", disabled=not can_send):
     if not selected_rows:
-        st.warning("Please select at least one company.")
+        st.warning("Please select at least one company from the checklist.")
     else:
         try:
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.starttls()
-            server.login(gmail_user.strip(), gmail_pass.strip().replace(" ", ""))
+            with st.spinner("Connecting to Gmail Server..."):
+                server = smtplib.SMTP("smtp.gmail.com", 587)
+                server.starttls()
+                server.login(gmail_user.strip(), gmail_pass.strip().replace(" ", ""))
 
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -139,7 +149,12 @@ if st.button("SEND REMINDERS", use_container_width=True, type="primary", disable
                     st.warning(f"Skipping {row['company']} - No valid email.")
                     continue
                 
-                month_name = pd.to_datetime(row['due_date']).strftime('%B')
+                # Month extraction for Template
+                try:
+                    month_name = pd.to_datetime(row['due_date']).strftime('%B')
+                except:
+                    month_name = "the current month"
+                
                 msg = MIMEMultipart()
                 msg['Subject'] = f"Payment Reminder: {row['company']}"
                 msg['To'] = target
@@ -160,21 +175,24 @@ Tuesday Accounts Team"""
                 msg.attach(MIMEText(body, 'plain', 'utf-8'))
                 server.send_message(msg)
 
-                # Update Cloud
-                supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
+                # Update Cloud status
+                supabase.table("billing_history").update({
+                    "status": "Sent Reminder",
+                    "notes": f"Reminder sent on {datetime.now().strftime('%d/%m/%Y')}"
+                }).eq("id", row['id']).execute()
                 
-                # Update Progress
+                # Update UI Progress
                 percent = (i + 1) / len(selected_rows)
                 progress_bar.progress(percent)
-                status_text.text(f"Sending to {row['company']} ({i+1}/{len(selected_rows)})...")
+                status_text.markdown(f"✅ Sent to **{row['company']}** ({i+1}/{len(selected_rows)})")
 
             server.quit()
             st.balloons()
-            st.success("Reminders sent successfully!")
+            st.success("Success! All selected reminders sent.")
             time.sleep(2)
             st.rerun()
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Gmail/SMTP Error: {e}")
 
 if not can_send:
-    st.info("ℹ️ To enable sending, please upload the Mailing List and enter your App Password.")
+    st.info("ℹ️ Sending is disabled. Please upload the Mailing List Excel and enter your Gmail App Password.")
