@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from supabase import create_client
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # --- 1. CONNECTION ---
 @st.cache_resource
@@ -21,13 +21,14 @@ def get_data():
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
         df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
         df['balance'] = df['amount'] - df['received_amount']
+        
+        # המרה בטוחה לתאריכים - טיפול בפורמטים שונים
         df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce').dt.date
         df['due_date_dt'] = pd.to_datetime(df['due_date'], errors='coerce').dt.date
     return df
 
 # --- 2. CONFIG & STYLE ---
 st.set_page_config(page_title="Tuesday | Analytics", layout="wide")
-
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -48,10 +49,20 @@ if df_raw.empty:
 
 st.sidebar.header("🔍 Global Filters")
 
-# Date Filter
-min_date = df_raw['date_dt'].min()
-max_date = df_raw['date_dt'].max()
-date_range = st.sidebar.date_input("Date Range", [min_date, max_date])
+# --- תיקון השגיאה: בדיקת תקינות התאריכים לפני חישוב מינימום/מקסימום ---
+valid_dates = df_raw['date_dt'].dropna()
+if not valid_dates.empty:
+    default_min = valid_dates.min()
+    default_max = valid_dates.max()
+else:
+    default_min = date.today() - timedelta(days=30)
+    default_max = date.today()
+
+# פילטר תאריכים בטוח
+try:
+    date_range = st.sidebar.date_input("Date Range", [default_min, default_max])
+except:
+    date_range = [default_min, default_max]
 
 # Company Filter
 companies = sorted(df_raw['company'].unique())
@@ -61,36 +72,39 @@ selected_companies = st.sidebar.multiselect("Companies", companies, default=comp
 statuses = sorted(df_raw['status'].unique())
 selected_statuses = st.sidebar.multiselect("Statuses", statuses, default=statuses)
 
-# Apply Filters
+# החלת הפילטרים
+start_date = date_range[0]
+end_date = date_range[1] if len(date_range) > 1 else date_range[0]
+
 mask = (
-    (df_raw['date_dt'] >= date_range[0]) & 
-    (df_raw['date_dt'] <= (date_range[1] if len(date_range) > 1 else date_range[0])) &
+    (df_raw['date_dt'].fillna(date.min) >= start_date) & 
+    (df_raw['date_dt'].fillna(date.max) <= end_date) &
     (df_raw['company'].isin(selected_companies)) &
     (df_raw['status'].isin(selected_statuses))
 )
 df = df_raw.loc[mask]
 
-if st.sidebar.button("🔄 Clear Cache & Refresh"):
+if st.sidebar.button("🔄 Refresh Data"):
     st.cache_resource.clear()
     st.rerun()
 
 # --- 4. CALCULATIONS ---
-today = datetime.now().date()
-next_week = today + timedelta(days=7)
+today_date = date.today()
+next_week = today_date + timedelta(days=7)
 
 total_billed = df['amount'].sum()
 total_received = df['received_amount'].sum()
 total_pending = df['balance'].sum()
 
-# Accurate Overdue: Only where status is 'Overdue' OR (due_date passed AND status not Paid)
+# Overdue logic
 overdue_amount = df[
     (df['status'] == 'Overdue') | 
-    ((df['due_date_dt'] < today) & (df['status'] != 'Paid'))
+    ((df['due_date_dt'] < today_date) & (df['status'] != 'Paid'))
 ]['balance'].sum()
 
-# Expected this week: Due dates within the next 7 days
+# Expected this week
 expected_this_week = df[
-    (df['due_date_dt'] >= today) & 
+    (df['due_date_dt'] >= today_date) & 
     (df['due_date_dt'] <= next_week) & 
     (df['status'] != 'Paid')
 ]['balance'].sum()
@@ -108,7 +122,7 @@ k5.metric("Due This Week 📅", f"₪{expected_this_week:,.0f}")
 st.markdown("---")
 
 # --- 6. VISUALS ---
-c1, c2 = st.columns([1, 1])
+c1, c2 = st.columns(2)
 
 with c1:
     st.subheader("Billing by Status")
@@ -117,18 +131,20 @@ with c1:
                      hole=0.5, template="plotly_white",
                      color='status',
                      color_discrete_map={'Paid':'#10B981', 'Sent':'#6366F1', 'Overdue':'#EF4444', 'Partial':'#F59E0B'})
-    fig_pie.update_layout(margin=dict(t=30, b=0, l=0, r=0))
     st.plotly_chart(fig_pie, use_container_width=True)
 
 with c2:
     st.subheader("Monthly Performance")
+    # יצירת ציר זמן מסודר
     df['month_year'] = pd.to_datetime(df['date_dt']).dt.strftime('%b %Y')
-    trend_df = df.sort_values('date_dt').groupby('month_year', sort=False).agg({'amount':'sum', 'received_amount':'sum'}).reset_index()
-    fig_trend = go.Figure()
-    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['amount'], name='Billed', marker_color='#6366F1'))
-    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['received_amount'], name='Collected', marker_color='#10B981'))
-    fig_trend.update_layout(barmode='group', template="plotly_white", margin=dict(t=30, b=0, l=0, r=0))
-    st.plotly_chart(fig_trend, use_container_width=True)
+    trend_df = df.dropna(subset=['date_dt']).sort_values('date_dt')
+    if not trend_df.empty:
+        trend_summary = trend_df.groupby('month_year', sort=False).agg({'amount':'sum', 'received_amount':'sum'}).reset_index()
+        fig_trend = go.Figure()
+        fig_trend.add_trace(go.Bar(x=trend_summary['month_year'], y=trend_summary['amount'], name='Billed', marker_color='#6366F1'))
+        fig_trend.add_trace(go.Bar(x=trend_summary['month_year'], y=trend_summary['received_amount'], name='Collected', marker_color='#10B981'))
+        fig_trend.update_layout(barmode='group', template="plotly_white")
+        st.plotly_chart(fig_trend, use_container_width=True)
 
 st.markdown("---")
 
@@ -148,7 +164,6 @@ pivot_table = pivot_table.sort_values(by='balance', ascending=False)
 st.dataframe(
     pivot_table,
     column_config={
-        "company": "Company",
         "amount": st.column_config.NumberColumn("Billed", format="₪%.0f"),
         "received_amount": st.column_config.NumberColumn("Collected", format="₪%.0f"),
         "balance": st.column_config.NumberColumn("Debt", format="₪%.0f"),
@@ -157,14 +172,3 @@ st.dataframe(
     use_container_width=True, 
     hide_index=True
 )
-
-# --- 8. TOP DEBTORS ---
-st.subheader("Top 5 Debtors")
-top_5 = pivot_table[pivot_table['balance'] > 0].head(5)
-if not top_5.empty:
-    fig_debt = px.bar(top_5, x='company', y='balance', 
-                      text_auto='.2s', color='balance', color_continuous_scale='Reds',
-                      labels={'balance': 'Unpaid', 'company': 'Client'}, template="plotly_white")
-    st.plotly_chart(fig_debt, use_container_width=True)
-else:
-    st.success("No outstanding debts for current selection!")
