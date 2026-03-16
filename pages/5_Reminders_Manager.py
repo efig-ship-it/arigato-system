@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import smtplib, time, random
+import smtplib, time
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -15,29 +15,21 @@ def init_connection():
 supabase = init_connection()
 
 def get_overdue_from_cloud():
-    # פתרון קסם: הוספת סדר אקראי קטן (או מזהה זמן) מבטיח שהשאילתה תמיד תהיה "חדשה" לענן
-    # זה מונע מכל מנגנון זיכרון בדרך להגיש לנו מידע ישן
-    res = supabase.table("billing_history")\
-        .select("*")\
-        .eq("status", "Overdue")\
-        .order("id")\
-        .execute()
-    
-    df = pd.DataFrame(res.data)
-    if not df.empty:
-        df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
-        df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
-        df['balance'] = df['amount'] - df['received_amount']
-    return df
+    # שליפה ישירה ללא Cache כדי להבטיח סנכרון עם עמוד 4
+    try:
+        res = supabase.table("billing_history").select("*").eq("status", "Overdue").execute()
+        df = pd.DataFrame(res.data)
+        if not df.empty:
+            df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
+            df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
+            df['balance'] = df['amount'] - df['received_amount']
+        return df
+    except Exception as e:
+        st.error(f"Error fetching from Cloud: {e}")
+        return pd.DataFrame()
 
 # --- 2. UI & STYLE ---
 st.set_page_config(page_title="Tuesday | Recovery", layout="wide")
-
-# פונקציית ריענון מובנית שתנקה את כל הזיכרון של הדף
-def clear_all_and_refresh():
-    st.cache_data.clear()
-    st.cache_resource.clear()
-    st.rerun()
 
 st.markdown("""
     <style>
@@ -49,8 +41,10 @@ col_title, col_refresh = st.columns([5, 1])
 with col_title:
     st.markdown('<p class="recovery-title">Overdue Reminders (Page 5) 🚨</p>', unsafe_allow_html=True)
 with col_refresh:
-    if st.button("🔄 Sync with Cloud", help="לחץ כאן אם עדכנת סטטוס בעמוד אחר והוא לא מופיע"):
-        clear_all_and_refresh()
+    if st.button("🔄 Sync Cloud"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.rerun()
 
 # --- 3. INPUTS ---
 with st.expander("🛠️ Email Settings & Contacts", expanded=True):
@@ -59,13 +53,11 @@ with st.expander("🛠️ Email Settings & Contacts", expanded=True):
     gmail_user = c1.text_input("Your Gmail")
     gmail_pass = c2.text_input("App Password", type="password")
 
-# --- 4. LOGIC ---
+# --- 4. DATA PROCESSING ---
 df_overdue = get_overdue_from_cloud()
 
 if df_overdue.empty:
     st.success("Clean Slate! No Overdue transactions found in Cloud. ☕")
-    st.info("Check Page 4 to ensure status is set to 'Overdue'.")
-    # אם בכל זאת אתה חושב שיש נתונים, הכפתור למעלה ינקה הכל
     st.stop()
 
 if up_contacts:
@@ -80,8 +72,13 @@ if up_contacts:
 
         st.subheader(f"Pending Actions: {len(df_final)}")
         
-        # צ'קלקלה
         selected_indices = []
+        # כותרות הטבלה
+        h1, h2, h3, h4 = st.columns([0.5, 2, 2, 2])
+        h2.write("**Company**")
+        h3.write("**Balance**")
+        h4.write("**Email**")
+
         for idx, row in df_final.iterrows():
             with st.container():
                 c1, c2, c3, c4 = st.columns([0.5, 2, 2, 2])
@@ -90,10 +87,10 @@ if up_contacts:
                 with c2:
                     st.write(f"**{row['company']}**")
                 with c3:
-                    st.write(f"Debt: ₪{row['balance']:,.2f}")
+                    st.write(f"₪{row['balance']:,.2f}")
                 with c4:
                     email_display = row[email_col] if pd.notna(row[email_col]) else "⚠️ No Email"
-                    st.write(f"To: `{email_display}`")
+                    st.write(f"`{email_display}`")
                 
                 if is_selected:
                     selected_indices.append(idx)
@@ -102,33 +99,41 @@ if up_contacts:
 
         if st.button("🚀 EXECUTE REMINDERS", use_container_width=True, type="primary"):
             if not selected_indices:
-                st.warning("Select companies first.")
+                st.warning("Please select at least one company.")
             elif not gmail_user or not gmail_pass:
-                st.error("Credentials missing.")
+                st.error("Missing Gmail credentials.")
             else:
                 try:
                     server = smtplib.SMTP("smtp.gmail.com", 587)
                     server.starttls()
                     server.login(gmail_user.strip(), gmail_pass.strip().replace(" ", ""))
 
-                    for i in selected_indices:
-                        row = df_final.iloc[i]
+                    prog = st.progress(0)
+                    for i, idx_in_final in enumerate(selected_indices):
+                        row = df_final.iloc[idx_in_final]
                         target = str(row[email_col])
                         if "@" not in target: continue
 
                         msg = MIMEMultipart()
                         msg['Subject'] = f"FOLLOW UP: Payment Status - {row['company']}"
+                        msg['From'] = gmail_user
                         msg['To'] = target
-                        msg.attach(MIMEText(f"Hello,\n\nPlease settle your balance of ₪{row['balance']:,.2f}.", 'plain'))
+                        body = f"Hello {row['company']},\n\nPlease settle your outstanding balance of ₪{row['balance']:,.2f}.\n\nRegards,"
+                        msg.attach(MIMEText(body, 'plain'))
                         server.send_message(msg)
 
-                        # עדכון מידי לענן
+                        # עדכון סטטוס בענן - כדי שייצא מהרשימה
                         supabase.table("billing_history").update({"status": "Sent Reminder"}).eq("id", row['id']).execute()
+                        prog.progress((i + 1) / len(selected_indices))
 
                     server.quit()
                     st.balloons()
-                    st.success("Done! Records moved to 'Sent Reminder' status.")
+                    st.success("Reminders sent and Cloud updated!")
                     time.sleep(1)
-                    clear_all_and_refresh()
+                    st.rerun()
                 except Exception as e:
-                    st.error(
+                    st.error(f"SMTP Error: {e}")
+    except Exception as e:
+        st.error(f"Excel Error: {e}")
+else:
+    st.info("Please upload your contacts Excel to link emails.")
