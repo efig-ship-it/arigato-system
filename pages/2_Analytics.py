@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 from supabase import create_client
 from datetime import datetime
 
-# --- 1. חיבור לבסיס הנתונים (עצמאי לחלוטין) ---
+# --- 1. חיבור לבסיס הנתונים (עצמאי) ---
 @st.cache_resource
 def init_connection():
     u = st.secrets["SUPABASE_URL"].strip().replace('"', '')
@@ -22,7 +22,7 @@ def get_data():
         df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
         df['received_amount'] = pd.to_numeric(df['received_amount'], errors='coerce').fillna(0)
         df['balance'] = df['amount'] - df['received_amount']
-        # המרת תאריך לפורמט פייתון
+        # המרת תאריך לפורמט פייתון (יום-חודש-שנה)
         df['date_dt'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
         df['month_year'] = df['date_dt'].dt.strftime('%m/%Y')
     return df
@@ -58,9 +58,9 @@ collection_rate = (total_received / total_billed * 100) if total_billed > 0 else
 
 # תצוגת כרטיסי מדדים
 m1, m2, m3, m4 = st.columns(4)
-m1.metric("סה\"כ חויב (Billed)", f"₪{total_billed:,.0f}")
-m2.metric("סה\"כ נגבה (Collected)", f"₪{total_received:,.0f}")
-m3.metric("יתרה פתוחה (Outstanding)", f"₪{total_pending:,.0f}", delta=f"{collection_rate:.1f}% גבייה", delta_color="normal")
+m1.metric("סה\"כ חויב", f"₪{total_billed:,.0f}")
+m2.metric("סה\"כ נגבה", f"₪{total_received:,.0f}")
+m3.metric("יתרה פתוחה", f"₪{total_pending:,.0f}", delta=f"{collection_rate:.1f}% גבייה", delta_color="normal")
 m4.metric("מספר תיקים", len(df))
 
 st.divider()
@@ -69,24 +69,28 @@ st.divider()
 c1, c2 = st.columns(2)
 
 with c1:
-    st.subheader("התפלגות לפי סטטוס")
+    st.subheader("התפלגות סכומים לפי סטטוס")
     status_summary = df.groupby('status')['amount'].sum().reset_index()
     fig_pie = px.pie(status_summary, values='amount', names='status', 
                      hole=0.4, 
                      color='status',
                      color_discrete_map={'Paid':'#10B981', 'Sent':'#3B82F6', 'Overdue':'#EF4444', 'Partial':'#F59E0B'})
+    fig_pie.update_layout(showlegend=True)
     st.plotly_chart(fig_pie, use_container_width=True)
 
 with c2:
-    st.subheader("מגמת חיוב מול גבייה")
+    st.subheader("מגמת חיוב מול גבייה חודשית")
+    # סינון שורות ללא תאריך תקין לצורך הגרף
     trend_df = df.dropna(subset=['date_dt']).sort_values('date_dt')
-    trend_df = trend_df.groupby('month_year').agg({'amount':'sum', 'received_amount':'sum'}).reset_index()
-    
-    fig_trend = go.Figure()
-    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['amount'], name='חויב', marker_color='#3B82F6'))
-    fig_trend.add_trace(go.Bar(x=trend_df['month_year'], y=trend_df['received_amount'], name='נגבה', marker_color='#10B981'))
-    fig_trend.update_layout(barmode='group', xaxis_title="חודש/שנה")
-    st.plotly_chart(fig_trend, use_container_width=True)
+    if not trend_df.empty:
+        trend_summary = trend_df.groupby('month_year').agg({'amount':'sum', 'received_amount':'sum'}).reset_index()
+        fig_trend = go.Figure()
+        fig_trend.add_trace(go.Bar(x=trend_summary['month_year'], y=trend_summary['amount'], name='חויב', marker_color='#3B82F6'))
+        fig_trend.add_trace(go.Bar(x=trend_summary['month_year'], y=trend_summary['received_amount'], name='נגבה', marker_color='#10B981'))
+        fig_trend.update_layout(barmode='group', xaxis_title="חודש/שנה")
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("אין מספיק נתוני תאריכים להצגת מגמה.")
 
 st.divider()
 
@@ -100,26 +104,33 @@ pivot_table = df.groupby('company').agg({
     'id': 'count'
 }).rename(columns={'id': 'חשבוניות'}).reset_index()
 
-# חישוב אחוז גבייה פר חברה
-pivot_table['% גבייה'] = (pivot_table['received_amount'] / pivot_table['amount'] * 100).round(1)
+# חישוב אחוז גבייה לצורך ה-Progress Bar
+pivot_table['% גבייה'] = (pivot_table['received_amount'] / pivot_table['amount'] * 100).fillna(0)
 pivot_table = pivot_table.sort_values(by='balance', ascending=False)
 
-# הצגת הטבלה עם עיצוב מותנה
+# הצגת הטבלה עם רכיב ה-Progress המובנה של Streamlit
 st.dataframe(
-    pivot_table.style.background_gradient(subset=['balance'], cmap="Reds")
-    .format({'amount': '₪{:,.0f}', 'received_amount': '₪{:,.0f}', 'balance': '₪{:,.0f}', '% גבייה': '{:.1f}%'}),
-    use_container_width=True, hide_index=True
+    pivot_table,
+    column_config={
+        "company": "שם חברה",
+        "amount": st.column_config.NumberColumn("חויב", format="₪%.0f"),
+        "received_amount": st.column_config.NumberColumn("נגבה", format="₪%.0f"),
+        "balance": st.column_config.NumberColumn("יתרה לחוב", format="₪%.0f"),
+        "חשבוניות": st.column_config.NumberColumn("כמות"),
+        "% גבייה": st.column_config.ProgressColumn("אחוז גבייה", format="%.0f%%", min_value=0, max_value=100),
+    },
+    use_container_width=True, 
+    hide_index=True
 )
 
 # --- 6. 5 החייבים הגדולים ---
-st.subheader("⚠️ 5 החייבים הגדולים ביותר")
+st.subheader("⚠️ 5 החייבים הגדולים ביותר (יתרת חוב)")
 top_5 = pivot_table[pivot_table['balance'] > 0].head(5)
 if not top_5.empty:
     fig_debt = px.bar(top_5, x='company', y='balance', 
-                      text='balance',
+                      text_auto='.2s',
                       labels={'balance': 'חוב פתוח', 'company': 'חברה'},
                       color='balance', color_continuous_scale='Reds')
-    fig_debt.update_traces(texttemplate='₪%{text:,.0f}', textposition='outside')
     st.plotly_chart(fig_debt, use_container_width=True)
 else:
-    st.success("אין חובות פתוחים במערכת!")
+    st.success("כל החובות נגבו! אין חייבים כרגע. 🎉")
